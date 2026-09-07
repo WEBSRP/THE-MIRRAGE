@@ -1,0 +1,133 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-sand: #d4b896;
+  --color-sandstone: #c4a67a;
+  --color-sandstone-light: #dcc9a3;
+  --color-gold-muted: #b8963e;
+  --color-gold-dark: #8a6d2b;
+  --color-parchment: #e8dcc8;
+  --color-dark-earth: #2a1f14;
+  --color-earth-brown: #3d2e1f;
+  --color-obsidian: #0d0a07;
+  --color-dust: rgba(212, 184, 150, 0.15);
+  --color-haze: rgba(180, 150, 110, 0.08);
+
+  --font-heading: 'Cinzel', serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+:root {
+  --sand: #d4b896;
+  --sandstone: #c4a67a;
+  --sandstone-light: #dcc9a3;
+  --gold-muted: #b8963e;
+  --gold-dark: #8a6d2b;
+  --parchment: #e8dcc8;
+  --dark-earth: #2a1f14;
+  --earth-brown: #3d2e1f;
+  --obsidian: #0d0a07;
+  --dust: rgba(212, 184, 150, 0.15);
+  --haze: rgba(180, 150, 110, 0.08);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--obsidian);
+  color: var(--parchment);
+  font-family: 'Inter', sans-serif;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6, .heading, .font-display {
+  font-family: 'Cinzel', serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--obsidian);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--dark-earth);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--earth-brown);
+}
+
+/* Selection */
+::selection {
+  background-color: var(--gold-muted);
+  color: var(--obsidian);
+}
+
+/* Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes dust {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(100px, 100px);
+  }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes sandDrift {
+  from { background-position: 0 0; }
+  to { background-position: 1000px 0; }
+}
+
+/* Utilities */
+.text-shadow-glow {
+  text-shadow: 0 0 10px rgba(184, 150, 62, 0.3);
+}
+
+.animate-fade-in {
+  animation: fadeIn 1s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 1s ease-out forwards;
+}
+
+.glass-panel {
+  background-color: rgba(42, 31, 20, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(212, 184, 150, 0.1);
+}

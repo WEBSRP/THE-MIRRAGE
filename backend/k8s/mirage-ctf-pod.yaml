@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mirrage-sessions
+  labels:
+    mirrage.io/purpose: player-sandboxes
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: session-sample-template
+  namespace: mirrage-sessions
+  labels:
+    app.kubernetes.io/name: mirrage-session
+    mirrage.io/session-id: session-template
+    mirrage.io/user-id: user-template
+spec:
+  restartPolicy: Never
+  containers:
+    # -------------------------------------------------------------
+    # Container 1: Mirage Honeypot (Decoy SSH on Port 22)
+    # The decoy environment the player initially connects to.
+    # -------------------------------------------------------------
+    - name: mirage-honeypot
+      image: mirrage/mirage-honeypot:latest
+      ports:
+        - containerPort: 22
+          name: mirage-ssh
+      resources:
+        limits:
+          cpu: "200m"
+          memory: "256Mi"
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop:
+            - ALL
+      env:
+        - name: SESSION_ID
+          value: "session-template"
+        - name: PLAYER_USERNAME
+          value: "player"
+
+    # -------------------------------------------------------------
+    # Container 2: CTF Challenge Core (Internal Port 2222)
+    # The real target environment discovered through deception clues.
+    # -------------------------------------------------------------
+    - name: ctf-core
+      image: mirrage/ctf-core:latest
+      ports:
+        - containerPort: 2222
+          name: ctf-internal
+      resources:
+        limits:
+          cpu: "300m"
+          memory: "512Mi"
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+      env:
+        - name: SESSION_ID
+          value: "session-template"
+        - name: PLAYER_USERNAME
+          value: "player"
