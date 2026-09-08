@@ -186,3 +186,39 @@ async def test_deactivated_account_login_and_token_rejected(
         json={"username_or_email": test_user.username, "password": "CyberSecret2026!"},
     )
     assert login_resp2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_dev_login_fails_closed_in_non_dev(async_client: AsyncClient, monkeypatch):
+    """Test that /dev-login is strictly blocked in testing and production."""
+    # 1. In default test environment ("testing")
+    res_test = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
+    assert res_test.status_code == 403
+    assert res_test.json()["code"] == "DEV_ACCESS_FORBIDDEN"
+
+    # 2. In production environment
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    res_prod = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
+    assert res_prod.status_code == 403
+    assert res_prod.json()["code"] == "DEV_ACCESS_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_dev_login_succeeds_in_development(async_client: AsyncClient, monkeypatch):
+    """Test that /dev-login provisions dev_player and returns valid token in development."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    res = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["user"]["username"] == "dev_player"
+    assert data["user"]["email"] == "dev_player@mirrage.io"
+
+    # Verify authenticated request works with returned token
+    me_res = await async_client.get(
+        f"{settings.API_V1_STR}/auth/me",
+        headers={"Authorization": f"Bearer {data['access_token']}"}
+    )
+    assert me_res.status_code == 200
+    assert me_res.json()["username"] == "dev_player"
+

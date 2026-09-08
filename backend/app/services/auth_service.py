@@ -88,5 +88,49 @@ class AuthService:
         result = await db.execute(query)
         return result.scalars().first()
 
+    async def get_or_create_dev_user(self, db: AsyncSession) -> Token:
+        """
+        Retrieve or initialize the development test user ('dev_player').
+        Strictly guarded: Caller must verify settings.ENVIRONMENT == 'development'.
+        """
+        if settings.ENVIRONMENT != "development":
+            raise MirrageException(
+                status_code=403,
+                detail="Development test access is disabled in this environment.",
+                code="DEV_ACCESS_FORBIDDEN"
+            )
+
+        query = select(User).where(User.username == "dev_player")
+        result = await db.execute(query)
+        user = result.scalars().first()
+
+        if not user:
+            user = User(
+                email="dev_player@mirrage.io",
+                username="dev_player",
+                hashed_password=hash_password("MirrageDev2026!Fixture"),
+                is_active=True,
+                is_admin=False,
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            await vpn_service.generate_or_get_profile(db, user)
+
+        # Generate JWT token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        token_str = create_access_token(
+            subject=user.id,
+            expires_delta=access_token_expires,
+            extra_claims={"username": user.username, "is_admin": user.is_admin}
+        )
+
+        return Token(
+            access_token=token_str,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=UserOut.model_validate(user)
+        )
+
 
 auth_service = AuthService()

@@ -29,7 +29,9 @@ export function useCountdown({
   const intervalRef = useRef<number | null>(null);
   const onCompleteRef = useRef(onComplete);
 
-  onCompleteRef.current = onComplete;
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   const clearTimer = useCallback(() => {
     if (intervalRef.current !== null) {

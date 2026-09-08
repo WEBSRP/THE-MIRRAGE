@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.deps import get_current_user, get_db
+from backend.app.core.config import settings
+from backend.app.core.exceptions import MirrageException
 from backend.app.models.user import User
 from backend.app.schemas.user import Token, UserLogin, UserOut, UserRegister
 from backend.app.services.auth_service import auth_service
@@ -53,3 +55,27 @@ async def get_me(
 ):
     """Retrieve details for the currently authenticated player."""
     return current_user
+
+
+@router.post(
+    "/dev-login",
+    response_model=Token,
+    summary="Development Test Access"
+)
+async def dev_login(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Authenticate as the development fixture test user ('dev_player').
+    STRICT SECURITY GUARD:
+    Only accessible when ENVIRONMENT is 'development'.
+    Fails closed with 403 Forbidden in production, testing, or any non-development environment.
+    """
+    if settings.ENVIRONMENT != "development":
+        raise MirrageException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Development access is disabled in this environment.",
+            code="DEV_ACCESS_FORBIDDEN"
+        )
+    return await auth_service.get_or_create_dev_user(db=db)
+

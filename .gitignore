@@ -48,3 +48,6 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Project specific design assets
+MIRRAGE Cyber Interface UI Kit.png

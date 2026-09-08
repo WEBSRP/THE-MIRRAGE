@@ -1,70 +1,53 @@
-// Session service abstraction
-// Currently uses mocked data. Will be replaced with real API calls.
-// Future endpoint: POST /api/session
+import { api } from './api';
 
 export interface SessionResponse {
   session_id: string;
   mirage_ip: string;
-  status: 'initializing' | 'ready' | 'expired' | 'error';
+  status: 'pending' | 'initializing' | 'provisioning' | 'ready' | 'stopping' | 'terminated' | 'expired' | 'error';
+  mirage_port?: number;
+  player_vpn_ip?: string;
+  expires_at?: string;
+  time_remaining_seconds?: number;
+  message?: string;
 }
 
-export interface SessionError {
-  message: string;
-  code: string;
+export interface SessionStatusResponse {
+  session_id: string;
+  status: string;
+  mirage_ip: string;
+  mirage_port: number;
+  player_vpn_ip: string;
+  created_at: string;
+  ready_at: string | null;
+  expires_at: string;
+  last_active_at: string;
+  time_remaining_seconds: number;
+  is_ready: boolean;
 }
 
-// API base URL - will be configured for production
+export interface SlotInfo {
+  total_slots: number;
+  active_slots: number;
+  available_slots: number;
+  is_slot_available: boolean;
+}
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
-/**
- * Request a new session from the backend.
- * Currently returns mocked data after a simulated delay.
- * 
- * Future implementation will POST to /api/session
- */
 export async function createSession(): Promise<SessionResponse> {
-  // --- MOCK IMPLEMENTATION ---
-  // Replace this block with actual API call when backend is ready:
-  // const response = await fetch(`${API_BASE_URL}/api/session`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  // });
-  // if (!response.ok) throw new Error('Session creation failed');
-  // return response.json();
-  
-  return new Promise((resolve) => {
-    // Simulate the 90-second initialization
-    // The actual delay is handled by the UI countdown
-    resolve({
-      session_id: `session-${generateMockId()}`,
-      mirage_ip: `10.42.0.${Math.floor(Math.random() * 254) + 1}`,
-      status: 'ready',
-    });
-  });
+  return api.post<SessionResponse>('/api/v1/session/start');
 }
 
-/**
- * Check session status
- */
-export async function getSessionStatus(sessionId: string): Promise<SessionResponse> {
-  // --- MOCK IMPLEMENTATION ---
-  // Replace with: GET /api/session/:sessionId
-  return {
-    session_id: sessionId,
-    mirage_ip: '10.42.0.1',
-    status: 'ready',
-  };
+export async function getSessionStatus(sessionId?: string): Promise<SessionStatusResponse> {
+  const query = sessionId ? `?session_id=${sessionId}` : '';
+  return api.get<SessionStatusResponse>(`/api/v1/session/status${query}`);
 }
 
-/**
- * Terminate a session
- */
-export async function terminateSession(sessionId: string): Promise<void> {
-  // --- MOCK IMPLEMENTATION ---
-  // Replace with: DELETE /api/session/:sessionId
-  console.info(`Session ${sessionId} terminated (mock)`);
+export async function terminateSession(sessionId?: string): Promise<SessionResponse> {
+  const query = sessionId ? `?session_id=${sessionId}` : '';
+  return api.post<SessionResponse>(`/api/v1/session/stop${query}`);
 }
 
-function generateMockId(): string {
-  return Math.random().toString(36).substring(2, 8);
+export async function getSlotInfo(): Promise<SlotInfo> {
+  return api.get<SlotInfo>('/api/v1/session/slots');
 }
