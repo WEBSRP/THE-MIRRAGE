@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import backend.app.models
 import logging
 from backend.app.core.database import AsyncSessionLocal, init_db
 from backend.app.services.challenge_service import challenge_service
