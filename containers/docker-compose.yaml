@@ -1,0 +1,110 @@
+services:
+
+  # ============================================================
+  # MIRRAGE
+  # Decoy / Honeypot Container
+  # ============================================================
+  mirrage:
+    build:
+      context: ./mirrage
+      dockerfile: Dockerfile
+
+    container_name: mirrage
+    hostname: mirrage
+
+    # Fixed private IP
+    networks:
+      mirrage_net:
+        ipv4_address: 172.20.0.10
+
+    # Persistent storage
+    #
+    # Data survives:
+    # - container restart
+    # - container recreation
+    # - Docker restart
+    # - EC2 reboot
+    volumes:
+      - ./mirrage/data:/opt/mirrage
+      - ./mirrage/logs:/var/log/mirrage
+
+    # SSH is available to the Docker network/VPN routing.
+    # It is NOT published as EC2:port.
+    expose:
+      - "22"
+
+    # Do not allow container -> Docker daemon control
+    privileged: false
+
+    # Automatic recovery
+    restart: unless-stopped
+
+    # Basic health check
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Prevent accidental privilege escalation
+    security_opt:
+      - no-new-privileges:true
+
+
+  # ============================================================
+  # CTF
+  # Real CTF Machine
+  # ============================================================
+  ctf:
+    build:
+      context: ./ctf
+      dockerfile: Dockerfile
+
+    container_name: ctf
+    hostname: ctf
+
+    # Fixed private IP
+    networks:
+      mirrage_net:
+        ipv4_address: 172.20.0.20
+
+    # Persistent CTF storage
+    #
+    # Keep this completely separate from Mirage.
+    volumes:
+      - ./ctf/data:/opt/ctf
+      - ./ctf/logs:/var/log/ctf
+
+    # SSH available internally/VPN
+    # NOT directly exposed to the Internet
+    expose:
+      - "22"
+
+    privileged: false
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    security_opt:
+      - no-new-privileges:true
+
+
+# ============================================================
+# PRIVATE DOCKER NETWORK
+# ============================================================
+networks:
+
+  mirrage_net:
+    driver: bridge
+
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1

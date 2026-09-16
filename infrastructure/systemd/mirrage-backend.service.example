@@ -1,0 +1,17 @@
+[Unit]
+Description=MIRRAGE FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/THE-MIRRAGE
+Environment="PYTHONPATH=/home/admin/THE-MIRRAGE"
+Environment="PATH=/home/admin/THE-MIRRAGE/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/admin/THE-MIRRAGE/backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

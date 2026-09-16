@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: session-1
+  labels:
+    app: mirrage-session
+    session: session-1
+
+spec:
+  containers:
+
+    - name: mirage
+      image: docker.io/library/mirrage-mirrage:latest
+      imagePullPolicy: Never
+
+    - name: ctf
+      image: docker.io/library/mirrage-ctf:latest
+      imagePullPolicy: Never
