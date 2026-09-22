@@ -104,6 +104,7 @@ def test_production_fails_closed_with_mock_services():
     bad_prod_settings = Settings(
         ENVIRONMENT="production",
         SECRET_KEY="A-Very-Secure-And-Long-Production-Key-With-No-Banned-Words-32chars",
+        OTP_HMAC_SECRET="A-Dedicated-Secure-OTP-HMAC-Key-For-Production-At-Least-32",
         K8S_MODE="mock",
         VPN_MODE="production",
         ALLOW_MOCK_IN_PRODUCTION=False,

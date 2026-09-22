@@ -3,6 +3,7 @@ from backend.app.models.session import GameSession, SessionStatus
 from backend.app.models.vpn import VpnProfile
 from backend.app.models.activity import ActivityLog, ActivityEventType
 from backend.app.models.challenge import Challenge, FlagSubmission
+from backend.app.models.otp import OtpCode
 
 __all__ = [
     "User",
@@ -13,4 +14,5 @@ __all__ = [
     "ActivityEventType",
     "Challenge",
     "FlagSubmission",
+    "OtpCode",
 ]

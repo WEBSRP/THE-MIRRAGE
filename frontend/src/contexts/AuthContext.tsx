@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { getMe, logout as logoutService, type User } from '../services/authService';
+import { getMe, logout as logoutService, verifyOtp, type User, type OtpTokenResponse } from '../services/authService';
 
 interface AuthContextType {
   user: User | null;
@@ -8,6 +8,7 @@ interface AuthContextType {
   setUser: (user: User | null) => void;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  otpLogin: (email: string, otp: string) => Promise<OtpTokenResponse>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -44,6 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const otpLogin = useCallback(async (email: string, otp: string) => {
+    const result = await verifyOtp(email, otp);
+    setUser(result.user);
+    return result;
+  }, []);
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -52,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser,
       logout,
       refreshUser,
+      otpLogin,
     }}>
       {children}
     </AuthContext.Provider>

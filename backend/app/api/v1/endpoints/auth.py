@@ -5,6 +5,7 @@ from backend.app.core.config import settings
 from backend.app.core.exceptions import MirrageException
 from backend.app.models.user import User
 from backend.app.schemas.user import Token, UserLogin, UserOut, UserRegister
+from backend.app.schemas.otp import OtpRequest, OtpResend, OtpResponse, OtpTokenResponse, OtpVerify
 from backend.app.services.auth_service import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -79,3 +80,67 @@ async def dev_login(
         )
     return await auth_service.get_or_create_dev_user(db=db)
 
+
+@router.post(
+    "/request-otp",
+    response_model=OtpResponse,
+    summary="Request OTP verification code"
+)
+async def request_otp_endpoint(
+    data: OtpRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Send a 6-digit OTP verification code to the given email.
+    Response is always generic to prevent email enumeration.
+    """
+    try:
+        await auth_service.request_otp(db=db, email=data.email)
+    except MirrageException as e:
+        # Re-raise rate limit errors (these don't reveal email existence)
+        if e.code == "OTP_RATE_LIMIT":
+            raise
+    except Exception:
+        pass
+    return OtpResponse(message="If this email can receive an OTP, a verification code has been sent.")
+
+
+@router.post(
+    "/verify-otp",
+    response_model=OtpTokenResponse,
+    summary="Verify OTP and authenticate"
+)
+async def verify_otp_endpoint(
+    data: OtpVerify,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Verify OTP code and authenticate the user.
+    Creates a new account if the email is not yet registered.
+    Returns a JWT access token.
+    """
+    return await auth_service.verify_otp(db=db, email=data.email, otp=data.otp)
+
+
+@router.post(
+    "/resend-otp",
+    response_model=OtpResponse,
+    summary="Resend OTP verification code"
+)
+async def resend_otp_endpoint(
+    data: OtpResend,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Resend a new OTP verification code, invalidating any previous code.
+    Enforces cooldown and rate limiting.
+    """
+    try:
+        await auth_service.resend_otp(db=db, email=data.email)
+    except MirrageException as e:
+        # Re-raise rate limit/cooldown errors (these don't reveal email existence)
+        if e.code in ("OTP_COOLDOWN", "OTP_RATE_LIMIT"):
+            raise
+    except Exception:
+        pass  # Swallow other errors to prevent email enumeration
+    return OtpResponse(message="If this email can receive an OTP, a new verification code has been sent.")

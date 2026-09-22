@@ -58,3 +58,29 @@ export async function devLogin(): Promise<AuthResponse> {
   localStorage.setItem('mirrage-token', result.access_token);
   return result;
 }
+
+export interface OtpResponse {
+  message: string;
+}
+
+export interface OtpTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  is_new_user: boolean;
+  user: User;
+}
+
+export async function requestOtp(email: string): Promise<OtpResponse> {
+  return api.post<OtpResponse>('/api/v1/auth/request-otp', { email });
+}
+
+export async function verifyOtp(email: string, otp: string): Promise<OtpTokenResponse> {
+  const result = await api.post<OtpTokenResponse>('/api/v1/auth/verify-otp', { email, otp });
+  localStorage.setItem('mirrage-token', result.access_token);
+  return result;
+}
+
+export async function resendOtp(email: string): Promise<OtpResponse> {
+  return api.post<OtpResponse>('/api/v1/auth/resend-otp', { email });
+}

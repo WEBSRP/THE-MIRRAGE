@@ -125,6 +125,13 @@ export function LoginPage() {
           </Link>
         </div>
 
+        <div className="mt-4 text-center text-sm text-[var(--text-muted)]">
+          Or{' '}
+          <Link to="/otp-login" className="text-[var(--accent)] hover:underline">
+            sign in with email code
+          </Link>
+        </div>
+
         {import.meta.env.DEV && (
           <div className="mt-12 pt-6 border-t border-white/10">
             <button

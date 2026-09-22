@@ -25,6 +25,13 @@ from backend.app.schemas.challenge import (
     FlagSubmitRequest,
     FlagSubmitResponse,
 )
+from backend.app.schemas.otp import (
+    OtpRequest,
+    OtpVerify,
+    OtpResend,
+    OtpResponse,
+    OtpTokenResponse,
+)
 
 __all__ = [
     "UserRegister",
@@ -44,4 +51,9 @@ __all__ = [
     "ChallengeOut",
     "FlagSubmitRequest",
     "FlagSubmitResponse",
+    "OtpRequest",
+    "OtpVerify",
+    "OtpResend",
+    "OtpResponse",
+    "OtpTokenResponse",
 ]

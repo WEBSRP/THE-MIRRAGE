@@ -2,6 +2,7 @@ import os
 # Configure testing environment before any app modules are loaded
 os.environ.setdefault("ENVIRONMENT", "testing")
 os.environ.setdefault("SECRET_KEY", "test-only-jwt-secret-key-not-for-production-use-minimum-32-characters")
+os.environ.setdefault("OTP_HMAC_SECRET", "test-only-otp-hmac-secret-not-for-production-use-32-chars")
 os.environ.setdefault("K8S_MODE", "mock")
 os.environ.setdefault("VPN_MODE", "mock")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")

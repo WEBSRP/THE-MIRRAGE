@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from backend.app.models.vpn import VpnProfile
     from backend.app.models.activity import ActivityLog
     from backend.app.models.challenge import FlagSubmission
+    from backend.app.models.otp import OtpCode
 
 
 class User(Base):
@@ -32,8 +33,13 @@ class User(Base):
         index=True,
         nullable=False
     )
-    hashed_password: Mapped[str] = mapped_column(
+    hashed_password: Mapped[Optional[str]] = mapped_column(
         String(255),
+        nullable=True
+    )
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
         nullable=False
     )
     is_active: Mapped[bool] = mapped_column(
@@ -56,6 +62,13 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
+    )
+
+    # Relationships
+    otp_codes: Mapped[List["OtpCode"]] = relationship(
+        "OtpCode",
+        back_populates="user",
+        cascade="all, delete-orphan"
     )
 
     # Relationships

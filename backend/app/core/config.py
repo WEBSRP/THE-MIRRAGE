@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Security & Authentication
     SECRET_KEY: str
+    OTP_HMAC_SECRET: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     ALGORITHM: str = "HS256"
 
@@ -48,6 +49,32 @@ class Settings(BaseSettings):
             
         return v
 
+    @field_validator("OTP_HMAC_SECRET")
+    @classmethod
+    def validate_otp_hmac_secret(cls, v: str, info: ValidationInfo) -> str:
+        env = info.data.get("ENVIRONMENT", "development")
+        if env == "testing":
+            return v or "test-otp-hmac-secret-not-for-production-min-32-chars"
+        
+        if env == "production":
+            if not v:
+                raise ValueError("OTP_HMAC_SECRET is required in production")
+            insecure_terms = ["mirrage", "changeme", "secret", "test", "default"]
+            is_insecure = len(v) < 32 or any(term in v.lower() for term in insecure_terms)
+            if is_insecure:
+                raise ValueError(
+                    "OTP_HMAC_SECRET in production must be at least 32 characters long "
+                    "and not contain common insecure words like 'mirrage', 'test', etc."
+                )
+        elif env == "development":
+            if not v:
+                # Provide a sensible dev fallback if not set
+                return "dev-otp-hmac-secret-must-be-at-least-32-characters-long"
+            if len(v) < 32:
+                import warnings
+                warnings.warn("OTP_HMAC_SECRET is weak. Consider using a 32+ character random secret.")
+        return v
+
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
@@ -55,6 +82,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
         "https://mirrage.vercel.app",
+        "https://themirrage.me",
+        "https://www.themirrage.me",
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -68,6 +97,23 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./mirrage.db"
+
+    # OTP Configuration
+    OTP_EXPIRY_MINUTES: int = 10
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_RESEND_COOLDOWN_SECONDS: int = 60
+    OTP_MAX_REQUESTS_PER_WINDOW: int = 5
+    OTP_RATE_LIMIT_WINDOW_MINUTES: int = 30
+    OTP_DEV_MODE: bool = False
+
+    # Email Configuration
+    EMAIL_PROVIDER: str = ""
+    EMAIL_API_KEY: str = ""
+    EMAIL_FROM: str = ""
+    EMAIL_FROM_NAME: str = "MIRRAGE"
+    EMAIL_REPLY_TO: str = ""
+    # Backward-compatible alias for existing code
+    EMAIL_FROM_ADDRESS: str = "noreply@mirrage.io"
 
     # Session & Slot Management
     MAX_CONCURRENT_SESSIONS: int = 3
@@ -101,10 +147,15 @@ class Settings(BaseSettings):
                 raise ValueError("K8S_MODE must be 'production' in production environment unless ALLOW_MOCK_IN_PRODUCTION is true")
             if self.VPN_MODE != "production" and not self.ALLOW_MOCK_IN_PRODUCTION:
                 raise ValueError("VPN_MODE must be 'production' in production environment unless ALLOW_MOCK_IN_PRODUCTION is true")
+            if self.OTP_DEV_MODE:
+                raise ValueError("OTP_DEV_MODE must be false in production to prevent OTP leakage to logs")
             
-            insecure_terms = ["mirrage", "changeme", "secret", "test"]
+            insecure_terms = ["mirrage", "changeme", "secret", "test", "default"]
             is_insecure = len(self.SECRET_KEY) < 32 or any(term in self.SECRET_KEY.lower() for term in insecure_terms)
             if is_insecure:
                 raise ValueError("SECRET_KEY in production is insecure")
+            
+            if not self.OTP_HMAC_SECRET or len(self.OTP_HMAC_SECRET) < 32 or any(term in self.OTP_HMAC_SECRET.lower() for term in insecure_terms):
+                raise ValueError("OTP_HMAC_SECRET in production must be at least 32 characters long and secure")
 
 settings = Settings()
