@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 from backend.app.api.deps import get_current_user, get_db
 from backend.app.core.config import settings
 from backend.app.core.exceptions import MirrageException
@@ -7,6 +8,8 @@ from backend.app.models.user import User
 from backend.app.schemas.user import Token, UserLogin, UserOut, UserRegister
 from backend.app.schemas.otp import OtpRequest, OtpResend, OtpResponse, OtpTokenResponse, OtpVerify
 from backend.app.services.auth_service import auth_service
+
+logger = logging.getLogger("mirrage.auth")
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -100,8 +103,9 @@ async def request_otp_endpoint(
         # Re-raise rate limit errors (these don't reveal email existence)
         if e.code == "OTP_RATE_LIMIT":
             raise
+        logger.error("OTP request failed with MirrageException: %s", e.code)
     except Exception:
-        pass
+        logger.exception("OTP request failed unexpectedly")
     return OtpResponse(message="If this email can receive an OTP, a verification code has been sent.")
 
 
@@ -141,6 +145,7 @@ async def resend_otp_endpoint(
         # Re-raise rate limit/cooldown errors (these don't reveal email existence)
         if e.code in ("OTP_COOLDOWN", "OTP_RATE_LIMIT"):
             raise
+        logger.error("OTP resend failed with MirrageException: %s", e.code)
     except Exception:
-        pass  # Swallow other errors to prevent email enumeration
+        logger.exception("OTP resend failed unexpectedly")
     return OtpResponse(message="If this email can receive an OTP, a new verification code has been sent.")

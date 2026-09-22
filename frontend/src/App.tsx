@@ -4,7 +4,6 @@ import { MainLayout } from './layouts/MainLayout';
 import { DashboardLayout } from './layouts/DashboardLayout';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
-import { OtpLoginPage } from './pages/OtpLoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SessionPage } from './pages/SessionPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -45,7 +44,7 @@ function App() {
 
       {/* ─── Auth routes (own layout) ─── */}
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/otp-login" element={<OtpLoginPage />} />
+      <Route path="/otp-login" element={<Navigate to="/login" replace />} />
       <Route path="/register" element={<RegisterPage />} />
 
       {/* ─── Session init (own layout) ─── */}
