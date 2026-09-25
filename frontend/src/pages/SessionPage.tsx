@@ -12,7 +12,7 @@ import {
 } from '../services/sessionService';
 import { getVpnStatus, downloadVpnConfig } from '../services/vpnService';
 
-type SessionLifecycleStatus = 'idle' | 'starting' | 'initializing' | 'ready' | 'failed' | 'stopped';
+type SessionLifecycleStatus = 'idle' | 'starting' | 'initializing' | 'ready' | 'stopping' | 'failed' | 'stopped';
 type VpnConnectionStatus = 'unknown' | 'disconnected' | 'connected';
 
 const TOTAL_COUNTDOWN_MS = 3 * 60 * 1000; // 3-minute environment initialization window
@@ -32,7 +32,6 @@ export function SessionPage() {
   // Action & feedback states
   const [isCheckingInitial, setIsCheckingInitial] = useState(true);
   const [downloadingVpn, setDownloadingVpn] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState(false);
 
@@ -211,6 +210,8 @@ export function SessionPage() {
       }
     };
 
+    // Immediate first poll, then every 2.5s
+    poll();
     sessionPollRef.current = window.setInterval(poll, 2500);
 
     return () => {
@@ -252,7 +253,8 @@ export function SessionPage() {
 
   // Handler: Start Environment (User must explicitly click)
   const handleStartEnvironment = async () => {
-    if (sessionStatus === 'starting' || sessionStatus === 'initializing') {
+    // Only allow starting from idle or failed states — prevent double-clicks
+    if (sessionStatus !== 'idle' && sessionStatus !== 'failed') {
       return;
     }
 
@@ -286,13 +288,19 @@ export function SessionPage() {
 
   // Handler: Stop Environment
   const handleStopEnvironment = async () => {
-    setStopping(true);
+    if (sessionStatus === 'stopping') return; // Guard against double-click
+
+    // Remember previous status so we can restore on failure
+    const previousStatus = sessionStatus;
+    setSessionStatus('stopping');
+    // Immediately clear countdown/polling so nothing runs while we wait
+    clearCountdown();
+    clearSessionPoll();
+    clearVpnPoll();
+    setInitializationDeadline(null);
+
     try {
       await terminateSession();
-      clearCountdown();
-      clearSessionPoll();
-      clearVpnPoll();
-      setInitializationDeadline(null);
       setSessionStatus('idle');
       setSessionData(null);
       setVpnStatus('unknown');
@@ -304,8 +312,8 @@ export function SessionPage() {
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
       setError(apiErr.message || 'Failed to stop environment.');
-    } finally {
-      setStopping(false);
+      // Do not falsely show stopped — restore previous state and let next poll reconcile
+      setSessionStatus(previousStatus);
     }
   };
 
@@ -383,6 +391,8 @@ export function SessionPage() {
             ? 'MIRRAGE ACTIVE TARGET'
             : sessionStatus === 'initializing'
             ? 'ENVIRONMENT INITIALIZING'
+            : sessionStatus === 'stopping'
+            ? 'ENVIRONMENT STOPPING'
             : 'ENVIRONMENT CONSOLE'}
         </h1>
 
@@ -391,6 +401,8 @@ export function SessionPage() {
             ? 'Your isolated honeypot and target container are listening on the challenge subnet.'
             : sessionStatus === 'initializing'
             ? 'Provisioning dedicated dual-container pod. Target endpoints will unlock once ready.'
+            : sessionStatus === 'stopping'
+            ? 'Tearing down your environment and releasing resources.'
             : 'Launch your private, isolated training machine inside the MIRRAGE cluster.'}
         </p>
 
@@ -491,10 +503,9 @@ export function SessionPage() {
             <div className="text-center">
               <button
                 onClick={handleStopEnvironment}
-                disabled={stopping}
                 className="text-xs font-mono text-[var(--text-faint)] hover:text-[var(--danger)] transition-colors cursor-pointer"
               >
-                {stopping ? 'Cancelling...' : 'Cancel Environment Start'}
+                Cancel Environment Start
               </button>
             </div>
           </div>
@@ -631,10 +642,36 @@ export function SessionPage() {
               </Link>
               <button
                 onClick={handleStopEnvironment}
-                disabled={stopping}
                 className="btn-outline py-2.5 px-4 text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]/50 transition-colors cursor-pointer"
               >
-                {stopping ? 'Stopping...' : 'Stop Environment'}
+                Stop Environment
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── STATE: STOPPING (Teardown In-Flight) ─── */}
+        {!isCheckingInitial && sessionStatus === 'stopping' && (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-8 text-center">
+            <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="font-mono text-xs uppercase tracking-wider text-[var(--text-muted)] mb-3">
+              Stopping Environment
+            </p>
+            <p className="text-xs text-[var(--text-faint)] font-mono">
+              Tearing down pod and releasing slot...
+            </p>
+            <div className="flex gap-3 mt-6">
+              <button
+                disabled
+                className="btn-primary flex-1 py-2.5 text-xs font-mono uppercase tracking-wider opacity-50 cursor-not-allowed"
+              >
+                Start Environment
+              </button>
+              <button
+                disabled
+                className="btn-outline flex-1 py-2.5 text-xs font-mono uppercase tracking-wider opacity-50 cursor-not-allowed"
+              >
+                Stopping...
               </button>
             </div>
           </div>
