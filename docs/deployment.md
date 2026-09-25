@@ -200,13 +200,21 @@ MIRAGE_CONTAINER_IMAGE=mirrage/mirage-honeypot:latest
 CTF_CONTAINER_IMAGE=mirrage/ctf-core:latest
 
 # VPN Gateway
-VPN_MODE=mock
+VPN_MODE=production
 OPENVPN_SERVER_HOST=ec2-18-205-71-26.compute-1.amazonaws.com
 OPENVPN_SERVER_PORT=1194
-OPENVPN_STATUS_LOG_PATH=/var/log/openvpn/openvpn-status.log
+OPENVPN_PROTO=udp
+OPENVPN_STATUS_LOG_PATH=/var/log/openvpn/status.log
+
+# Easy-RSA / Production VPN Provisioning
+EASYRSA_DIR=/home/admin/openvpn-ca
+EASYRSA_CA_CERT=/home/admin/openvpn-ca/pki/ca.crt
+EASYRSA_TLS_KEY=/home/admin/openvpn-ca/ta.key
+VPN_CA_PASSPHRASE_FILE=/etc/mirrage/vpn-ca-passphrase
+VPN_CLIENT_NAME_PREFIX=mirrage
 
 # Transitional Flag
-# Set to true while Kubernetes and OpenVPN live production drivers are finalized
+# Set to true while Kubernetes live production drivers are finalized
 ALLOW_MOCK_IN_PRODUCTION=true
 ```
 

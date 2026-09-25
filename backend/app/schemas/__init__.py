@@ -15,6 +15,7 @@ from backend.app.schemas.vpn import (
     VpnProfileOut,
     VpnStatusOut,
     VpnDownloadOut,
+    VpnRevokeResponse,
 )
 from backend.app.schemas.activity import (
     ActivityLogCreate,
@@ -46,6 +47,7 @@ __all__ = [
     "VpnProfileOut",
     "VpnStatusOut",
     "VpnDownloadOut",
+    "VpnRevokeResponse",
     "ActivityLogCreate",
     "ActivityLogOut",
     "ChallengeOut",

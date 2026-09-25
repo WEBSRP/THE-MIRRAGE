@@ -51,3 +51,6 @@ export async function terminateSession(sessionId?: string): Promise<SessionRespo
 export async function getSlotInfo(): Promise<SlotInfo> {
   return api.get<SlotInfo>('/api/v1/session/slots');
 }
+
+export const startSession = createSession;
+export const stopSession = terminateSession;

@@ -35,9 +35,9 @@ class VpnProfile(Base):
         nullable=False
     )
     # Assigned static/dynamic player VPN IP in the 10.8.0.0/24 subnet
-    assigned_ip: Mapped[str] = mapped_column(
+    assigned_ip: Mapped[Optional[str]] = mapped_column(
         String(45),
-        nullable=False
+        nullable=True
     )
     is_connected: Mapped[bool] = mapped_column(
         Boolean,
@@ -64,6 +64,11 @@ class VpnProfile(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None
     )
 
     # Relationships

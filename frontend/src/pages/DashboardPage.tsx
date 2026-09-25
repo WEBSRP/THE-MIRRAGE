@@ -5,18 +5,16 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getVpnStatus, downloadVpnConfig, downloadSignalConfig, type VpnStatus } from '../services/vpnService';
 import { getSessionStatus, type SessionStatusResponse } from '../services/sessionService';
 import { getActivity, type ActivityLog } from '../services/activityService';
-import { StartPlayingModal } from '../components/StartPlayingModal';
 
 export function DashboardPage() {
   const { user } = useAuth();
   const { theme } = useTheme();
   const navigate = useNavigate();
-  
+
   const [vpnStatus, setVpnStatus] = useState<VpnStatus | null>(null);
   const [sessionStatus, setSessionStatus] = useState<SessionStatusResponse | null>(null);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -66,15 +64,16 @@ export function DashboardPage() {
   };
 
   const greeting = theme === 'morning' ? 'Good morning' : 'Good evening';
-  
+
   // Environment ID generation or placeholder
-  const envId = sessionStatus?.session_id 
+  const envId = sessionStatus?.session_id
     ? `MIRAGE-${sessionStatus.session_id.substring(0, 4).toUpperCase()}`
     : 'MIRAGE-7F31';
-    
+
   const envIp = sessionStatus?.mirage_ip || '10.42.0.17';
-  
-  const isSessionOnline = sessionStatus?.status === 'active' || sessionStatus?.status === 'running';
+
+  const isSessionOnline = sessionStatus?.status === 'active' || sessionStatus?.status === 'running' || sessionStatus?.status === 'ready';
+  const isSessionInitializing = sessionStatus?.status === 'initializing' || sessionStatus?.status === 'provisioning' || sessionStatus?.status === 'pending';
 
   return (
     <div className="flex flex-col gap-8">
@@ -102,6 +101,11 @@ export function DashboardPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] inline-block"></span>
                     Online
                   </span>
+                ) : isSessionInitializing ? (
+                  <span className="text-[var(--accent)] text-xs flex items-center gap-1 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse inline-block"></span>
+                    Initializing...
+                  </span>
                 ) : (
                   <span className="text-[var(--text-muted)] text-xs flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] inline-block"></span>
@@ -113,7 +117,7 @@ export function DashboardPage() {
                 {envIp}
               </span>
             </div>
-            
+
             <div className="flex flex-col items-end gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-[var(--text-muted)]">VPN:</span>
@@ -129,34 +133,46 @@ export function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3 mt-2">
-            {!isSessionOnline && (
-              <button 
-                onClick={() => setModalOpen(true)}
-                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity"
+            {!isSessionOnline && !isSessionInitializing && (
+              <button
+                onClick={() => navigate('/session')}
+                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
               >
                 Start Environment
               </button>
             )}
-            <button 
-              onClick={handleDownloadVpn}
-              className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors"
-            >
-              Download VPN
-            </button>
-            <button 
+            {isSessionInitializing && (
+              <button
+                onClick={() => navigate('/session')}
+                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer font-mono"
+              >
+                View Console (Initializing)
+              </button>
+            )}
+            {isSessionOnline && (
+              <button
+                onClick={() => navigate('/session')}
+                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                Environment Console
+              </button>
+            )}
+            {isSessionOnline && (
+              <button
+                onClick={handleDownloadVpn}
+                className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors cursor-pointer"
+              >
+                Download VPN Profile
+              </button>
+            )}
+            <button
               onClick={handleDownloadSignal}
-              className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors"
+              className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors cursor-pointer"
             >
               Download Signal
             </button>
           </div>
         </div>
-
-        <StartPlayingModal
-          isOpen={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onConfirm={() => navigate('/session')}
-        />
 
         {/* Explore Challenges Card */}
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5 flex flex-col justify-between gap-4">
@@ -168,7 +184,7 @@ export function DashboardPage() {
               Step into realistic scenarios and test your skills.
             </p>
           </div>
-          <Link 
+          <Link
             to="/challenges"
             className="text-[var(--accent)] text-sm hover:underline flex items-center gap-1 w-fit"
           >
@@ -182,7 +198,7 @@ export function DashboardPage() {
         <h2 className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
           RECENT ACTIVITY
         </h2>
-        
+
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-1">
           {isLoading ? (
             <div className="p-4 text-sm text-[var(--text-muted)] text-center">Loading activity...</div>
@@ -192,9 +208,9 @@ export function DashboardPage() {
                 const date = new Date(activity.timestamp);
                 const isPositive = activity.event_type === 'challenge_solve' || activity.event_type === 'flag_submit';
                 const details = activity.payload ? JSON.stringify(activity.payload) : '';
-                
+
                 return (
-                  <li 
+                  <li
                     key={activity.id || idx}
                     className={`flex items-start gap-4 p-3 ${idx !== activities.length - 1 ? 'border-b border-[var(--border)]' : ''}`}
                   >

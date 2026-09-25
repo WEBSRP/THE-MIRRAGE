@@ -136,8 +136,15 @@ class Settings(BaseSettings):
     OPENVPN_SERVER_PORT: int = 1194
     OPENVPN_PROTO: str = "udp"
     OPENVPN_CA_PATH: str = "/etc/openvpn/ca.crt"
-    OPENVPN_STATUS_LOG_PATH: str = "/var/log/openvpn/openvpn-status.log"
+    OPENVPN_STATUS_LOG_PATH: str = "/var/log/openvpn/status.log"
     DEFAULT_VPN_SUBNET_PREFIX: str = "10.8.0."
+
+    # Easy-RSA / Production VPN Provisioning
+    EASYRSA_DIR: str = os.path.expanduser("~/openvpn-ca")
+    EASYRSA_CA_CERT: str = os.path.expanduser("~/openvpn-ca/pki/ca.crt")
+    EASYRSA_TLS_KEY: str = os.path.expanduser("~/openvpn-ca/ta.key")
+    VPN_CA_PASSPHRASE_FILE: str = "/etc/mirrage/vpn-ca-passphrase"
+    VPN_CLIENT_NAME_PREFIX: str = "mirrage"
     
     ALLOW_MOCK_IN_PRODUCTION: bool = False
 

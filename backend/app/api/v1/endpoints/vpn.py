@@ -1,8 +1,11 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.app.api.deps import get_current_user, get_db
+from backend.app.api.deps import get_current_user, get_current_admin_user, get_db
+from backend.app.core.exceptions import VpnConfigurationError
 from backend.app.models.user import User
-from backend.app.schemas.vpn import VpnDownloadOut, VpnStatusOut
+from backend.app.schemas.vpn import VpnDownloadOut, VpnStatusOut, VpnRevokeResponse
 from backend.app.services.vpn_service import vpn_service
 
 router = APIRouter(prefix="/vpn", tags=["OpenVPN & Connectivity"])
@@ -58,4 +61,27 @@ async def download_ovpn_file(
         headers={
             "Content-Disposition": f'attachment; filename="{profile_data.filename}"',
         },
+    )
+
+
+@router.post(
+    "/revoke",
+    response_model=VpnRevokeResponse,
+    summary="Revoke player's VPN certificate"
+)
+async def revoke_vpn_profile(
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Revoke the current user's VPN certificate. Admin only.
+    After revocation, the user will need to contact support for a new profile.
+    """
+    success = await vpn_service.revoke_profile(db=db, user=current_user)
+    if not success:
+        raise VpnConfigurationError(detail="No active VPN profile found to revoke.")
+
+    return VpnRevokeResponse(
+        message="VPN profile has been revoked.",
+        revoked_at=datetime.now(timezone.utc),
     )

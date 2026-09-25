@@ -47,8 +47,11 @@ The following files contain live cryptographic material, private keys, or infras
 ### Certificate Authority and PKI Protection
 
 - The Easy-RSA CA private key (`~/openvpn-ca/pki/private/ca.key`) is encrypted on disk with a strong passphrase.
-- The platform provisioning script (`infrastructure/openvpn/vpn_provisioner.py`) prompts for the passphrase dynamically or reads it in memory during certificate creation, clearing the passphrase from memory immediately after the subprocess executes.
-- Passphrases are never passed via command-line arguments (which would be visible in process tables) and are never written to disk or log files.
+- The backend production provisioning system (`backend/app/services/vpn_provisioner.py`) reads the passphrase from `/etc/mirrage/vpn-ca-passphrase` (restricted permissions: `root:admin 640`).
+- Passphrases are passed non-interactively via the `EASYRSA_PASSIN` environment variable directly to the subprocess (`shell=False`, explicit arg list) and cleared from memory immediately upon subprocess completion.
+- Passphrases are NEVER passed via command-line arguments (which would be visible in `ps`/process tables) and NEVER written to logs, database records, API responses, or generated `.ovpn` files.
+- All subprocess errors are passed through `_sanitize_error()` to strip any potential passphrase or private key references before raising exceptions.
+- Certificate revocation is managed via Easy-RSA `revoke` and `gen-crl`, updating `pki/index.txt` and generating updated CRLs (`pki/crl.pem`).
 
 ### Secret Key Complexity Enforcement
 

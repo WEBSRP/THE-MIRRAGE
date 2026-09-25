@@ -24,12 +24,12 @@ export async function getVpnProfile(): Promise<VpnProfile> {
   return api.get<VpnProfile>('/api/v1/vpn/profile');
 }
 
-export async function downloadVpnConfig(): Promise<void> {
+export async function downloadVpnConfig(filename?: string): Promise<void> {
   const blob = await api.download('/api/v1/vpn/download');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'mirrage.ovpn';
+  a.download = filename || 'mirrage.ovpn';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
