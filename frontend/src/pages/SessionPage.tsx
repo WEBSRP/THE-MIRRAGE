@@ -12,30 +12,39 @@ import {
 } from '../services/sessionService';
 import { getVpnStatus, downloadVpnConfig } from '../services/vpnService';
 
-type SessionLifecycleStatus = 'idle' | 'starting' | 'initializing' | 'ready' | 'stopping' | 'failed' | 'stopped';
+type SessionLifecycleStatus = 'idle' | 'starting' | 'initializing' | 'ready' | 'stopping' | 'failed';
 type VpnConnectionStatus = 'unknown' | 'disconnected' | 'connected';
 
-const TOTAL_COUNTDOWN_MS = 3 * 60 * 1000; // 3-minute environment initialization window
+const TOTAL_COUNTDOWN_MS = 3 * 60 * 1000; // 3-minute mandatory initialization window
 
 export function SessionPage() {
-  // State Model
+  // ── Core lifecycle state ──
   const [sessionStatus, setSessionStatus] = useState<SessionLifecycleStatus>('idle');
   const [vpnStatus, setVpnStatus] = useState<VpnConnectionStatus>('unknown');
+
+  // ── Mandatory 3-minute countdown ──
+  // The deadline is the absolute timestamp when the initialization window ends.
+  // This is the sole source of truth for the frontend timer.
   const [initializationDeadline, setInitializationDeadline] = useState<number | null>(null);
   const [timeRemainingMs, setTimeRemainingMs] = useState<number>(TOTAL_COUNTDOWN_MS);
 
-  // Session metadata
+  // ── Backend readiness (tracked SEPARATELY from UI lifecycle) ──
+  // The pod/infrastructure may become ready long before the 3-minute window ends.
+  // This flag records that fact WITHOUT transitioning the UI to 'ready'.
+  const [backendReady, setBackendReady] = useState(false);
+
+  // ── Session metadata ──
   const [sessionData, setSessionData] = useState<SessionStatusResponse | SessionResponse | null>(null);
   const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [vpnTunnelIp, setVpnTunnelIp] = useState<string | null>(null);
 
-  // Action & feedback states
+  // ── Action & feedback states ──
   const [isCheckingInitial, setIsCheckingInitial] = useState(true);
   const [downloadingVpn, setDownloadingVpn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState(false);
 
-  // Interval timer refs for reliable cleanup
+  // ── Interval timer refs for reliable cleanup ──
   const countdownIntervalRef = useRef<number | null>(null);
   const sessionPollRef = useRef<number | null>(null);
   const vpnPollRef = useRef<number | null>(null);
@@ -69,7 +78,9 @@ export function SessionPage() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // 1. Initial Page Load Check: detect existing session or refresh during initialization
+  // ════════════════════════════════════════════════════════════════════
+  // 1. INITIAL PAGE LOAD — detect existing session on refresh
+  // ════════════════════════════════════════════════════════════════════
   useEffect(() => {
     let mounted = true;
 
@@ -85,24 +96,17 @@ export function SessionPage() {
         if (slotsRes) setSlotInfo(slotsRes);
 
         if (statusRes) {
-          // If session is already ready/active
-          if (statusRes.is_ready || statusRes.status === 'ready' || statusRes.status === 'active') {
-            setSessionData(statusRes);
-            setSessionStatus('ready');
-            setIsCheckingInitial(false);
-            return;
-          }
+          const backendStatus = statusRes.status;
+          const isBackendReady = statusRes.is_ready || backendStatus === 'ready' || backendStatus === 'active';
+          const isInProgress =
+            backendStatus === 'initializing' ||
+            backendStatus === 'pending' ||
+            backendStatus === 'provisioning';
 
-          // If session is in progress (initializing / pending / provisioning)
-          if (
-            statusRes.status === 'initializing' ||
-            statusRes.status === 'pending' ||
-            statusRes.status === 'provisioning'
-          ) {
+          if (isBackendReady || isInProgress) {
             setSessionData(statusRes);
-            setSessionStatus('initializing');
 
-            // Reconstruct remaining countdown from server created_at timestamp
+            // Calculate how much of the mandatory 3-minute window remains
             const createdAtMs = statusRes.created_at
               ? new Date(statusRes.created_at).getTime()
               : Date.now();
@@ -110,13 +114,22 @@ export function SessionPage() {
             const remainingMs = Math.max(0, TOTAL_COUNTDOWN_MS - elapsedMs);
 
             if (remainingMs > 0) {
+              // 3-minute window still active — show initializing with reconstructed countdown
+              setBackendReady(isBackendReady);
+              setSessionStatus('initializing');
               setInitializationDeadline(Date.now() + remainingMs);
               setTimeRemainingMs(remainingMs);
+            } else if (isBackendReady) {
+              // 3-minute window has passed AND backend is ready — go straight to ready
+              setBackendReady(true);
+              setSessionStatus('ready');
             } else {
-              // 3 minutes exceeded but backend hasn't marked ready yet
+              // 3 minutes exceeded but backend still not ready
+              setBackendReady(false);
+              setSessionStatus('initializing');
+              // Keep polling with 0 remaining — the UI will show "still initializing"
+              setInitializationDeadline(null);
               setTimeRemainingMs(0);
-              setSessionStatus('failed');
-              setError('Environment initialization timed out. Please check status or retry.');
             }
             setIsCheckingInitial(false);
             return;
@@ -144,7 +157,17 @@ export function SessionPage() {
     };
   }, [clearCountdown, clearSessionPoll, clearVpnPoll]);
 
-  // 2. Real timestamp-based countdown interval
+  // ════════════════════════════════════════════════════════════════════
+  // 2. COUNTDOWN TICK — absolute-deadline-based, ticks every second
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // The backendReadyRef lets the tick callback read the latest backendReady
+  // without adding it to the effect dependency array (which would restart the interval).
+  const backendReadyRef = useRef(backendReady);
+  useEffect(() => {
+    backendReadyRef.current = backendReady;
+  }, [backendReady]);
+
   useEffect(() => {
     if (sessionStatus !== 'initializing' || !initializationDeadline) {
       clearCountdown();
@@ -158,10 +181,14 @@ export function SessionPage() {
       if (remaining <= 0) {
         clearCountdown();
         setInitializationDeadline(null);
-        setSessionStatus('failed');
-        setError(
-          'Environment initialization timed out after 3 minutes. The orchestrator is taking longer than expected. Please check status or try again.'
-        );
+
+        // Countdown complete — check if backend is also ready
+        if (backendReadyRef.current) {
+          // BOTH conditions met: countdown done AND backend ready → show READY
+          setSessionStatus('ready');
+        }
+        // If backend NOT ready yet, stay in 'initializing' with timeRemainingMs=0.
+        // The polling effect continues and will transition to ready once backend confirms.
       }
     };
 
@@ -173,7 +200,17 @@ export function SessionPage() {
     };
   }, [sessionStatus, initializationDeadline, clearCountdown]);
 
-  // 3. Session status polling during initialization
+  // ════════════════════════════════════════════════════════════════════
+  // 3. SESSION STATUS POLLING — runs during 'initializing'
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // When backend reports READY:
+  //   - Set backendReady = true
+  //   - Do NOT change sessionStatus to 'ready'
+  //   - The countdown or post-countdown logic handles that transition
+  //
+  // When backend reports ERROR/TERMINATED/EXPIRED:
+  //   - Immediately abort → show error
   useEffect(() => {
     if (sessionStatus !== 'initializing') {
       clearSessionPoll();
@@ -187,13 +224,18 @@ export function SessionPage() {
         const res = await getSessionStatus();
         if (!active) return;
 
-        // If backend reports READY before the countdown expires: stop countdown immediately
         if (res.is_ready || res.status === 'ready' || res.status === 'active') {
-          clearCountdown();
-          clearSessionPoll();
-          setInitializationDeadline(null);
+          // Backend is ready — record this, but do NOT skip the countdown
+          setBackendReady(true);
           setSessionData(res);
-          setSessionStatus('ready');
+
+          // If countdown has already finished (timeRemainingMs reached 0 and
+          // initializationDeadline was cleared), transition to ready now
+          if (!initializationDeadline && timeRemainingMs <= 0) {
+            clearSessionPoll();
+            setSessionStatus('ready');
+          }
+          // Otherwise: countdown is still running, stay in 'initializing'
           return;
         }
 
@@ -201,12 +243,16 @@ export function SessionPage() {
           clearCountdown();
           clearSessionPoll();
           setInitializationDeadline(null);
+          setBackendReady(false);
           setSessionStatus('failed');
           setError('The environment encountered an error during provisioning.');
           return;
         }
+
+        // Still initializing — update session data for metadata
+        setSessionData(res);
       } catch {
-        // Transient network error, keep polling until deadline expires
+        // Transient network error — keep polling
       }
     };
 
@@ -218,9 +264,11 @@ export function SessionPage() {
       active = false;
       clearSessionPoll();
     };
-  }, [sessionStatus, clearCountdown, clearSessionPoll]);
+  }, [sessionStatus, initializationDeadline, timeRemainingMs, clearCountdown, clearSessionPoll]);
 
-  // 4. VPN status polling when environment is READY
+  // ════════════════════════════════════════════════════════════════════
+  // 4. VPN STATUS POLLING — only when UI is in READY state
+  // ════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (sessionStatus !== 'ready') {
       clearVpnPoll();
@@ -251,32 +299,33 @@ export function SessionPage() {
     };
   }, [sessionStatus, clearVpnPoll]);
 
-  // Handler: Start Environment (User must explicitly click)
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLER: Start Environment (explicit user click only)
+  // ════════════════════════════════════════════════════════════════════
   const handleStartEnvironment = async () => {
-    // Only allow starting from idle or failed states — prevent double-clicks
+    // Only allow starting from idle or failed — prevent double session creation
     if (sessionStatus !== 'idle' && sessionStatus !== 'failed') {
       return;
     }
 
     setError(null);
+    setBackendReady(false);
     setSessionStatus('starting');
 
     try {
       const res = await createSession();
       setSessionData(res);
 
+      // ALWAYS enter the mandatory 3-minute initialization window.
+      // Even if the backend immediately reports 'ready', the UI must show
+      // the full countdown. Backend readiness is tracked separately.
       if (res.status === 'ready') {
-        // Immediate ready (e.g. restored session or fast mock)
-        setSessionStatus('ready');
-        setInitializationDeadline(null);
-        clearCountdown();
-      } else {
-        // Standard flow: environment is initializing
-        setSessionStatus('initializing');
-        const deadline = Date.now() + TOTAL_COUNTDOWN_MS;
-        setInitializationDeadline(deadline);
-        setTimeRemainingMs(TOTAL_COUNTDOWN_MS);
+        setBackendReady(true);
       }
+      setSessionStatus('initializing');
+      const deadline = Date.now() + TOTAL_COUNTDOWN_MS;
+      setInitializationDeadline(deadline);
+      setTimeRemainingMs(TOTAL_COUNTDOWN_MS);
     } catch (err: unknown) {
       const apiErr = err as { message?: string; detail?: string };
       const msg =
@@ -286,14 +335,14 @@ export function SessionPage() {
     }
   };
 
-  // Handler: Stop Environment
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLER: Stop Environment
+  // ════════════════════════════════════════════════════════════════════
   const handleStopEnvironment = async () => {
     if (sessionStatus === 'stopping') return; // Guard against double-click
 
-    // Remember previous status so we can restore on failure
     const previousStatus = sessionStatus;
     setSessionStatus('stopping');
-    // Immediately clear countdown/polling so nothing runs while we wait
     clearCountdown();
     clearSessionPoll();
     clearVpnPoll();
@@ -303,6 +352,7 @@ export function SessionPage() {
       await terminateSession();
       setSessionStatus('idle');
       setSessionData(null);
+      setBackendReady(false);
       setVpnStatus('unknown');
       setVpnTunnelIp(null);
       setError(null);
@@ -312,12 +362,14 @@ export function SessionPage() {
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
       setError(apiErr.message || 'Failed to stop environment.');
-      // Do not falsely show stopped — restore previous state and let next poll reconcile
+      // Do not falsely show stopped — restore previous state
       setSessionStatus(previousStatus);
     }
   };
 
-  // Handler: Download VPN Profile (Explicit user click only - NO auto-download)
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLER: Download VPN Profile (explicit user click only — NO auto-download)
+  // ════════════════════════════════════════════════════════════════════
   const handleDownloadVpn = async () => {
     setDownloadingVpn(true);
     try {
@@ -333,21 +385,40 @@ export function SessionPage() {
     }
   };
 
-  // Handler: Manual status check on error/timeout
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLER: Manual status check (from error/timeout state)
+  // ════════════════════════════════════════════════════════════════════
   const handleCheckStatus = async () => {
     setError(null);
     try {
       const res = await getSessionStatus();
       setSessionData(res);
-      if (res.is_ready || res.status === 'ready' || res.status === 'active') {
-        setSessionStatus('ready');
+      const isReady = res.is_ready || res.status === 'ready' || res.status === 'active';
+
+      if (isReady) {
+        // Backend is ready — check if 3-minute window has passed
+        const createdAtMs = res.created_at ? new Date(res.created_at).getTime() : 0;
+        const elapsedMs = Date.now() - createdAtMs;
+
+        if (elapsedMs >= TOTAL_COUNTDOWN_MS) {
+          setBackendReady(true);
+          setSessionStatus('ready');
+        } else {
+          // Still within the 3-minute window — show remaining countdown
+          const remainingMs = Math.max(0, TOTAL_COUNTDOWN_MS - elapsedMs);
+          setBackendReady(true);
+          setSessionStatus('initializing');
+          setInitializationDeadline(Date.now() + remainingMs);
+          setTimeRemainingMs(remainingMs);
+        }
       } else if (
         res.status === 'initializing' ||
         res.status === 'pending' ||
         res.status === 'provisioning'
       ) {
+        setBackendReady(false);
         setSessionStatus('initializing');
-        const deadline = Date.now() + 60000; // Give an extra minute to complete
+        const deadline = Date.now() + 60000; // Give an extra minute
         setInitializationDeadline(deadline);
         setTimeRemainingMs(60000);
       } else {
@@ -371,6 +442,9 @@ export function SessionPage() {
 
   const mirageIp = sessionData?.mirage_ip || '10.42.0.17';
   const miragePort = sessionData?.mirage_port || 22;
+
+  // Whether the countdown has reached zero
+  const countdownComplete = timeRemainingMs <= 0 && !initializationDeadline;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] flex">
@@ -470,18 +544,20 @@ export function SessionPage() {
           </div>
         )}
 
-        {/* ─── STATE 3: INITIALIZING (3-Minute Countdown Display) ─── */}
+        {/* ─── STATE 3: INITIALIZING (Mandatory 3-Minute Countdown) ─── */}
         {!isCheckingInitial && sessionStatus === 'initializing' && (
           <div className="space-y-6">
             <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-8 text-center">
               <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--accent)] block mb-3">
                 Initializing Environment
               </span>
+
+              {/* ── THE VISIBLE MM:SS COUNTDOWN ── */}
               <div className="font-mono text-5xl sm:text-6xl tracking-widest text-[var(--text)] font-semibold mb-4">
                 {formatCountdown(timeRemainingMs)}
               </div>
 
-              {/* Timestamp-based progress line */}
+              {/* Secondary progress bar synced to actual countdown */}
               <div className="h-1 bg-[var(--surface-alt)] rounded-full overflow-hidden max-w-xs mx-auto mb-4">
                 <div
                   className="h-full bg-[var(--accent)] transition-all duration-1000 ease-linear"
@@ -494,10 +570,19 @@ export function SessionPage() {
                 />
               </div>
 
+              {/* Status message depends on whether countdown is done but backend not ready */}
               <p className="text-xs text-[var(--text-muted)] leading-relaxed max-w-sm mx-auto">
-                Provisioning pod and isolated bridge. The environment will unlock automatically as
-                soon as it reports ready.
+                {countdownComplete && !backendReady
+                  ? 'Environment is still initializing. Waiting for backend to report ready...'
+                  : 'Your MIRRAGE environment is being prepared. You can stop the environment at any time.'}
               </p>
+
+              {/* Show a subtle indicator if backend became ready early */}
+              {backendReady && !countdownComplete && (
+                <p className="text-[11px] text-[var(--success)] font-mono mt-3">
+                  ✓ Infrastructure ready — completing initialization
+                </p>
+              )}
             </div>
 
             <div className="text-center">
@@ -505,7 +590,7 @@ export function SessionPage() {
                 onClick={handleStopEnvironment}
                 className="text-xs font-mono text-[var(--text-faint)] hover:text-[var(--danger)] transition-colors cursor-pointer"
               >
-                Cancel Environment Start
+                Stop Environment
               </button>
             </div>
           </div>
@@ -576,7 +661,7 @@ export function SessionPage() {
                 </div>
               </div>
 
-              {/* Download VPN Profile Button (Explicit user click only - NO auto-download) */}
+              {/* Download VPN Profile Button (Explicit user click only — NO auto-download) */}
               <button
                 onClick={handleDownloadVpn}
                 disabled={downloadingVpn}
