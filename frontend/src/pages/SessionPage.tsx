@@ -70,6 +70,15 @@ export function SessionPage() {
     }
   }, []);
 
+  // Health poll: periodic session status check while in READY state to detect pod disappearance
+  const healthPollRef = useRef<number | null>(null);
+  const clearHealthPoll = useCallback(() => {
+    if (healthPollRef.current !== null) {
+      window.clearInterval(healthPollRef.current);
+      healthPollRef.current = null;
+    }
+  }, []);
+
   // Format milliseconds into MM:SS
   const formatCountdown = (ms: number): string => {
     const totalSecs = Math.max(0, Math.ceil(ms / 1000));
@@ -154,8 +163,9 @@ export function SessionPage() {
       clearCountdown();
       clearSessionPoll();
       clearVpnPoll();
+      clearHealthPoll();
     };
-  }, [clearCountdown, clearSessionPoll, clearVpnPoll]);
+  }, [clearCountdown, clearSessionPoll, clearVpnPoll, clearHealthPoll]);
 
   // ════════════════════════════════════════════════════════════════════
   // 2. COUNTDOWN TICK — absolute-deadline-based, ticks every second
@@ -244,15 +254,31 @@ export function SessionPage() {
           clearSessionPoll();
           setInitializationDeadline(null);
           setBackendReady(false);
-          setSessionStatus('failed');
-          setError('The environment encountered an error during provisioning.');
+          setSessionData(null);
+          setSessionStatus('idle');
+          setError(
+            res.status === 'terminated'
+              ? 'Environment was terminated. The session pod may no longer exist.'
+              : 'The environment encountered an error during provisioning.'
+          );
           return;
         }
 
         // Still initializing — update session data for metadata
         setSessionData(res);
-      } catch {
-        // Transient network error — keep polling
+      } catch (err: unknown) {
+        // If 404 (no active session found), the pod/session is gone
+        const apiErr = err as { code?: string; status_code?: number };
+        if (apiErr.code === '404' || apiErr.status_code === 404) {
+          clearCountdown();
+          clearSessionPoll();
+          setInitializationDeadline(null);
+          setBackendReady(false);
+          setSessionData(null);
+          setSessionStatus('idle');
+          setError('Session no longer exists. The environment may have been terminated.');
+        }
+        // Other errors: transient network error — keep polling
       }
     };
 
@@ -298,6 +324,54 @@ export function SessionPage() {
       clearVpnPoll();
     };
   }, [sessionStatus, clearVpnPoll]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // 5. SESSION HEALTH POLL — verify session is still alive while READY
+  // ════════════════════════════════════════════════════════════════════
+  // The backend now verifies the K8s pod on every status request. If the pod
+  // has vanished, the backend reconciles the session to TERMINATED and returns
+  // that status. This poll catches that scenario so the UI doesn't show a
+  // stale "Environment Ready" with a dead pod IP.
+  useEffect(() => {
+    if (sessionStatus !== 'ready') {
+      clearHealthPoll();
+      return;
+    }
+
+    let active = true;
+
+    const checkHealth = async () => {
+      try {
+        const res = await getSessionStatus();
+        if (!active) return;
+
+        // If session is no longer active, the pod is gone
+        if (res.status === 'terminated' || res.status === 'expired' || res.status === 'error') {
+          clearHealthPoll();
+          clearVpnPoll();
+          setBackendReady(false);
+          setSessionData(null);
+          setVpnStatus('unknown');
+          setVpnTunnelIp(null);
+          setSessionStatus('idle');
+          setError('Environment was terminated. The session pod no longer exists.');
+        } else if (res.is_ready || res.status === 'ready' || res.status === 'active') {
+          // Session still alive — update metadata (IP may have changed)
+          setSessionData(res);
+        }
+      } catch {
+        // Transient error — keep polling. Next check will detect if session is gone.
+      }
+    };
+
+    // Check every 10 seconds (less aggressive than init polling since we're already ready)
+    healthPollRef.current = window.setInterval(checkHealth, 10_000);
+
+    return () => {
+      active = false;
+      clearHealthPoll();
+    };
+  }, [sessionStatus, clearHealthPoll, clearVpnPoll]);
 
   // ════════════════════════════════════════════════════════════════════
   // HANDLER: Start Environment (explicit user click only)
@@ -346,6 +420,7 @@ export function SessionPage() {
     clearCountdown();
     clearSessionPoll();
     clearVpnPoll();
+    clearHealthPoll();
     setInitializationDeadline(null);
 
     try {

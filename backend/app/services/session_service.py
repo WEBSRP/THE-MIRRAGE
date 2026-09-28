@@ -210,17 +210,59 @@ class SessionService:
         existing_session = await self.get_active_session_for_user(db, user.id)
         if existing_session:
             if existing_session.status == SessionStatus.READY:
-                return SessionResponse(
-                    session_id=existing_session.id,
-                    mirage_ip=existing_session.mirage_ip,
-                    status=existing_session.status,
-                    mirage_port=existing_session.mirage_port,
-                    player_vpn_ip=existing_session.player_vpn_ip,
-                    expires_at=existing_session.expires_at,
-                    time_remaining_seconds=_time_remaining(existing_session.expires_at),
-                    message="Active session restored",
-                )
-            raise ActiveSessionExistsError(existing_session.id)
+                # Verify the pod still exists before returning the session as active
+                if existing_session.pod_name:
+                    try:
+                        pod_status = await self.k8s_provisioner.get_pod_status(existing_session.pod_name)
+                        if pod_status is None or pod_status.get("phase") not in ("Running", "Pending"):
+                            # Pod is gone — terminate the stale session and allow a new start
+                            logger.warning(
+                                f"Existing session {existing_session.id}: pod {existing_session.pod_name} "
+                                f"no longer exists. Terminating stale session."
+                            )
+                            existing_session.status = SessionStatus.TERMINATED
+                            existing_session.terminated_at = datetime.now(timezone.utc)
+                            existing_session.error_message = "Pod no longer exists"
+                            await db.commit()
+                            # Fall through to create a new session
+                            existing_session = None
+                        else:
+                            return SessionResponse(
+                                session_id=existing_session.id,
+                                mirage_ip=existing_session.mirage_ip,
+                                status=existing_session.status,
+                                mirage_port=existing_session.mirage_port,
+                                player_vpn_ip=existing_session.player_vpn_ip,
+                                expires_at=existing_session.expires_at,
+                                time_remaining_seconds=_time_remaining(existing_session.expires_at),
+                                message="Active session restored",
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to verify pod for existing session: {e}")
+                        # Can't verify — return the existing session but don't claim it's definitively ready
+                        return SessionResponse(
+                            session_id=existing_session.id,
+                            mirage_ip=existing_session.mirage_ip,
+                            status=existing_session.status,
+                            mirage_port=existing_session.mirage_port,
+                            player_vpn_ip=existing_session.player_vpn_ip,
+                            expires_at=existing_session.expires_at,
+                            time_remaining_seconds=_time_remaining(existing_session.expires_at),
+                            message="Active session restored (pod verification unavailable)",
+                        )
+                else:
+                    return SessionResponse(
+                        session_id=existing_session.id,
+                        mirage_ip=existing_session.mirage_ip,
+                        status=existing_session.status,
+                        mirage_port=existing_session.mirage_port,
+                        player_vpn_ip=existing_session.player_vpn_ip,
+                        expires_at=existing_session.expires_at,
+                        time_remaining_seconds=_time_remaining(existing_session.expires_at),
+                        message="Active session restored",
+                    )
+            if existing_session:  # Guard: may have been set to None above after termination
+                raise ActiveSessionExistsError(existing_session.id)
 
         # 2. Atomically reserve slot and create INITIALIZING record under mutual exclusion
         async with self._slot_lock:
@@ -371,6 +413,40 @@ class SessionService:
                 if not session:
                     raise EntityNotFoundError("Active Session for User", user.username)
 
+        # ── K8s Pod Reconciliation ──
+        # If the session is supposedly active with a pod, verify the pod still exists.
+        # This prevents stale "READY" states when the pod has been deleted externally.
+        if session.is_active and session.pod_name:
+            try:
+                pod_status = await self.k8s_provisioner.get_pod_status(session.pod_name)
+                if pod_status is None:
+                    # Pod has vanished — reconcile DB state
+                    logger.warning(
+                        f"Session {session.id}: pod {session.pod_name} no longer exists. "
+                        f"Reconciling session state from {session.status} to TERMINATED."
+                    )
+                    session.status = SessionStatus.TERMINATED
+                    session.terminated_at = datetime.now(timezone.utc)
+                    session.error_message = "Environment pod was terminated externally"
+                    await db.commit()
+                elif pod_status.get("phase") not in ("Running", "Pending"):
+                    # Pod exists but is in a terminal state (Failed, Succeeded, Unknown)
+                    logger.warning(
+                        f"Session {session.id}: pod {session.pod_name} is in phase "
+                        f"{pod_status.get('phase')}. Reconciling to TERMINATED."
+                    )
+                    session.status = SessionStatus.TERMINATED
+                    session.terminated_at = datetime.now(timezone.utc)
+                    session.error_message = f"Environment pod entered {pod_status.get('phase')} state"
+                    await db.commit()
+            except Exception as e:
+                # K8s API unavailable — fail closed: do NOT report ready if we can't verify
+                logger.error(f"Session {session.id}: K8s verification failed: {e}")
+                # If K8s is unreachable, mark session as failed rather than displaying stale READY
+                session.status = SessionStatus.ERROR
+                session.error_message = "Cannot verify environment status"
+                await db.commit()
+
         # Compute remaining seconds
         time_rem = _time_remaining(session.expires_at) if session.is_active else 0
 
@@ -519,6 +595,46 @@ class SessionService:
             await db.commit()
 
         return count
+
+    async def reconcile_orphaned_sessions(self, db: AsyncSession) -> int:
+        """
+        Find active sessions whose Kubernetes pods no longer exist and terminate them.
+        This catches pods that were deleted externally (manual cleanup, node failure, etc.)
+        without going through the normal stop flow.
+        """
+        query = select(GameSession).where(
+            GameSession.status.in_(ACTIVE_STATUSES),
+            GameSession.pod_name.isnot(None),
+        )
+        result = await db.execute(query)
+        active_sessions: List[GameSession] = list(result.scalars().all())
+
+        now = datetime.now(timezone.utc)
+        reconciled = 0
+
+        for session in active_sessions:
+            try:
+                pod_status = await self.k8s_provisioner.get_pod_status(session.pod_name)
+                if pod_status is None or pod_status.get("phase") not in ("Running", "Pending"):
+                    phase = pod_status.get("phase") if pod_status else "NotFound"
+                    logger.warning(
+                        f"Reconciliation: Session {session.id} pod {session.pod_name} "
+                        f"is {phase}. Marking TERMINATED."
+                    )
+                    session.status = SessionStatus.TERMINATED
+                    session.terminated_at = now
+                    session.error_message = f"Pod reconciled: {phase}"
+                    reconciled += 1
+            except Exception as e:
+                logger.error(
+                    f"Reconciliation: Failed to check pod {session.pod_name} "
+                    f"for session {session.id}: {e}"
+                )
+
+        if reconciled > 0:
+            await db.commit()
+
+        return reconciled
 
 
 session_service = SessionService()
