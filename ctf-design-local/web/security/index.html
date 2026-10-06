@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Practices &bull; MIRRAGE</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <header>
+        <div class="nav-container">
+            <a href="/" class="brand">
+                <span class="brand-dot"></span>
+                <span>MIRRAGE</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/security/" class="active">Security</a></li>
+                <li><a href="/about/">About</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/forum/">Forum</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <h1>Security Architecture &amp; Policies</h1>
+            <p>Our operational standards for system integrity, vulnerability triage, and disclosure.</p>
+        </div>
+
+        <div class="content-box">
+            <h2>1. Defensive Practices</h2>
+            <p>The MIRRAGE platform implements defense-in-depth principles across all public-facing services. Core tenets include:</p>
+            <ul>
+                <li><strong>Principle of Least Privilege:</strong> Web endpoints and auxiliary processors run under restricted unprivileged service accounts (such as <code>www-data</code>) to prevent direct system compromise.</li>
+                <li><strong>Isolation Boundaries:</strong> Internal validation scripts and experimental preprocessor routines are segregated from administrative nodes.</li>
+                <li><strong>Continuous Log Auditing:</strong> Endpoint transactions and formatting pipelines are monitored for anomalous syntax execution.</li>
+            </ul>
+        </div>
+
+        <div class="content-box">
+            <h2>2. Responsible Disclosure Policy</h2>
+            <p>We encourage ethical researchers and community members to report potential security vulnerabilities responsibly. We adhere to a 90-day coordinated disclosure policy.</p>
+            <p>When reporting issues:</p>
+            <ul>
+                <li>Provide detailed reproduction steps and an explanation of potential impact.</li>
+                <li>Avoid accessing or modifying data that does not belong to your test account.</li>
+                <li>Allow our infrastructure team reasonable time to triage and remediate issues before public disclosure.</li>
+            </ul>
+        </div>
+
+        <div class="content-box">
+            <h2>3. Account &amp; Credential Hygiene</h2>
+            <p>Platform operators and contributors must adhere to strict credential requirements. Passwords must be at least 14 characters in length and stored using modern salted hashing algorithms. Remote administrative access is limited to key-authenticated SSH tunnels on non-standard ports.</p>
+        </div>
+
+        <div class="content-box">
+            <h2>4. Security Contact</h2>
+            <p>To report a vulnerability or request a security review, encrypt your advisory with our public key and send it to our triage team:</p>
+            <p><strong>Email:</strong> <code>security@mirrage.local</code><br>
+            <strong>PGP Key ID:</strong> <code>0x4D9F881A2BC041</code><br>
+            <strong>Key Fingerprint:</strong> <code>5E82 99B0 11C4 883A B7E2 4001 9A12 3341 4D9F 881A</code></p>
+        </div>
+    </main>
+
+    <footer>
+        <div class="footer-container">
+            <div>&copy; 2026 MIRRAGE Research Collective. Node ID: mrg-srv-01</div>
+            <ul class="footer-links">
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/robots.txt">robots.txt</a></li>
+            </ul>
+        </div>
+    </footer>
+
+</body>
+</html>

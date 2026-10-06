@@ -1,0 +1,8 @@
+# robots.txt for MIRRAGE platform
+User-agent: *
+Disallow: /admin/
+Disallow: /private/
+Disallow: /backup/
+Disallow: /internal/
+Disallow: /forum/submit
+Disallow: /server-status/

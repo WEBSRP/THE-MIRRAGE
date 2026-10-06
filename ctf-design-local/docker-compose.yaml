@@ -1,0 +1,19 @@
+services:
+  ctf:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+
+
+    container_name: mirrage-ctf-local
+
+    hostname: mirrage-ctf
+
+    ports:
+      - "8080:80"
+      - "2222:22"
+
+    restart: "no"
+
+    security_opt:
+      - no-new-privileges:true

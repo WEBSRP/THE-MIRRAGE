@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help &amp; Documentation &bull; MIRRAGE</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <header>
+        <div class="nav-container">
+            <a href="/" class="brand">
+                <span class="brand-dot"></span>
+                <span>MIRRAGE</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/about/">About</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/" class="active">Help</a></li>
+                <li><a href="/forum/">Forum</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <h1>Help &amp; Documentation</h1>
+            <p>User guides, forum usage guidelines, and technical troubleshooting FAQs.</p>
+        </div>
+
+        <div class="content-box">
+            <h2>Frequently Asked Questions</h2>
+            <ul>
+                <li><strong>How do I join the MIRRAGE researcher network?</strong><br>
+                Membership is open to defensive researchers and system engineers. You may read public forums and advisories immediately or create a research contributor handle to submit reports.</li>
+                <li><strong>Where can I post security advisories or ask technical questions?</strong><br>
+                All community topics, incident discussions, and vulnerability disclosures are hosted on the <a href="/forum/">MIRRAGE Community Forum</a>.</li>
+                <li><strong>Why was my thread delayed in appearing on the board?</strong><br>
+                New posts are held in an automated validation queue where content syntax and references are processed before public listing.</li>
+            </ul>
+        </div>
+
+        <div class="content-box">
+            <h2>Forum Usage &amp; Post Preprocessing</h2>
+            <p>When drafting a new topic on <a href="/forum/submit">Forum Submit</a>, authors can preview and validate their post formatting prior to publishing.</p>
+            <ul>
+                <li><strong>Supported Syntax:</strong> Plaintext, standard Markdown, and technical preformatted blocks.</li>
+                <li><strong>Validation Engine (Beta):</strong> The forum submission endpoint features a built-in preprocessor utility. In addition to default formatting, beta testers and platform engineers can invoke custom formatting utilities via the preprocessor parameter to verify output rendering.</li>
+                <li><strong>Output Inspection:</strong> Running the preprocessor captures standard stream output and displays the diagnostic results in the preview console.</li>
+            </ul>
+        </div>
+
+        <div class="content-box">
+            <h2>Account &amp; Access Troubleshooting</h2>
+            <ul>
+                <li><strong>SSH Administrative Access:</strong> Terminal access for verified infrastructure operators is strictly managed via key-based authentication on the maintenance port (port 2222 externally). Standard contributors do not require terminal credentials.</li>
+                <li><strong>Session Resets:</strong> If your browser loses session context during submission preview, clear your cookies or test directly using standard HTTP POST requests.</li>
+                <li><strong>Platform Node Status:</strong> All core services including the web server reverse proxy and forum submission backend run under isolated system accounts.</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer>
+        <div class="footer-container">
+            <div>&copy; 2026 MIRRAGE Research Collective. Node ID: mrg-srv-01</div>
+            <ul class="footer-links">
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/robots.txt">robots.txt</a></li>
+            </ul>
+        </div>
+    </footer>
+
+</body>
+</html>

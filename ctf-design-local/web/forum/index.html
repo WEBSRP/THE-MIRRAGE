@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Forum &bull; MIRRAGE</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <header>
+        <div class="nav-container">
+            <a href="/" class="brand">
+                <span class="brand-dot"></span>
+                <span>MIRRAGE</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/about/">About</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/forum/" class="active">Forum</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <h1>Community Discussion Forum</h1>
+            <p>Peer review, security research disclosures, and infrastructure status announcements.</p>
+        </div>
+
+        <div class="forum-toolbar">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="tag tag-notice">All Topics (5)</span>
+                <span class="tag">Announcements</span>
+                <span class="tag">Security</span>
+                <span class="tag">Operations</span>
+            </div>
+            <a href="/forum/submit" class="btn btn-primary">&#43; Create New Topic</a>
+        </div>
+
+        <div class="forum-threads">
+            <!-- Pinned: Welcome to MIRRAGE -->
+            <div class="thread-row">
+                <div class="thread-main">
+                    <div class="thread-title-line">
+                        <span class="tag tag-pinned">&#128204; Pinned</span>
+                        <a href="#" class="thread-title">Welcome to the MIRRAGE Research Community</a>
+                    </div>
+                    <p class="thread-snippet">Guidelines for participating in vulnerability discussions, sharing defensive signatures, and coordinating advisory releases.</p>
+                </div>
+                <div class="thread-meta">
+                    <span>by <strong>admin</strong></span>
+                    <span>&bull; 24 replies</span>
+                    <span>&bull; 2026-08-10</span>
+                </div>
+            </div>
+
+            <!-- Security Best Practices -->
+            <div class="thread-row">
+                <div class="thread-main">
+                    <div class="thread-title-line">
+                        <span class="tag">Security</span>
+                        <a href="#" class="thread-title">Security Best Practices for Threat Feed Integration</a>
+                    </div>
+                    <p class="thread-snippet">A comprehensive review of sanitization controls when aggregating external telemetry into internal SIEM alerting pipelines.</p>
+                </div>
+                <div class="thread-meta">
+                    <span>by <strong>rachel_c</strong></span>
+                    <span>&bull; 11 replies</span>
+                    <span>&bull; 2026-09-12</span>
+                </div>
+            </div>
+
+            <!-- Website Maintenance: subtle clue about forum validation engine -->
+            <div class="thread-row">
+                <div class="thread-main">
+                    <div class="thread-title-line">
+                        <span class="tag tag-notice">Operations</span>
+                        <a href="#" class="thread-title">Website Maintenance: Forum Validation Engine v2 Deployment</a>
+                    </div>
+                    <p class="thread-snippet">We have upgraded the backend submission handler on <code>/forum/submit</code>. Authors can now utilize the syntax preprocessor module to preview output prior to moderation queue ingestion.</p>
+                </div>
+                <div class="thread-meta">
+                    <span>by <strong>marcus_ops</strong></span>
+                    <span>&bull; 19 replies</span>
+                    <span>&bull; 2026-09-21</span>
+                </div>
+            </div>
+
+            <!-- Help with Account Issues -->
+            <div class="thread-row">
+                <div class="thread-main">
+                    <div class="thread-title-line">
+                        <span class="tag">Help</span>
+                        <a href="#" class="thread-title">Help with Account Verification &amp; Session Timeouts</a>
+                    </div>
+                    <p class="thread-snippet">Several members reported intermittent session drops when submitting long advisories. The web server proxy timeout has been adjusted accordingly.</p>
+                </div>
+                <div class="thread-meta">
+                    <span>by <strong>k_reynolds</strong></span>
+                    <span>&bull; 7 replies</span>
+                    <span>&bull; 2026-09-27</span>
+                </div>
+            </div>
+
+            <!-- Community Announcements -->
+            <div class="thread-row">
+                <div class="thread-main">
+                    <div class="thread-title-line">
+                        <span class="tag">Announcements</span>
+                        <a href="#" class="thread-title">Community Announcement: Q4 Research Papers and Peer Review Schedule</a>
+                    </div>
+                    <p class="thread-snippet">Submissions are now open for the upcoming defensive systems symposium. Please format submissions using our standard technical guidelines.</p>
+                </div>
+                <div class="thread-meta">
+                    <span>by <strong>sean_m</strong></span>
+                    <span>&bull; 15 replies</span>
+                    <span>&bull; 2026-09-30</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="footer-container">
+            <div>&copy; 2026 MIRRAGE Research Collective. Node ID: mrg-srv-01</div>
+            <ul class="footer-links">
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/robots.txt">robots.txt</a></li>
+            </ul>
+        </div>
+    </footer>
+
+</body>
+</html>
