@@ -36,6 +36,16 @@ async def lifespan(app: FastAPI):
         await challenge_service.seed_default_challenges(db)
     logger.info("Default CTF and deception challenges seeded.")
 
+    # 2.5 Reconcile any orphaned/stale sessions from DB against Kubernetes on startup
+    try:
+        from backend.app.services.session_service import session_service
+        async with AsyncSessionLocal() as db:
+            reconciled = await session_service.reconcile_orphaned_sessions(db)
+            if reconciled > 0:
+                logger.info(f"Startup reconciliation: cleaned {reconciled} orphaned session(s).")
+    except Exception as e:
+        logger.error(f"Startup reconciliation error: {e}")
+
     # 3. Start background worker for session expiration & cleanup
     cleanup_task = asyncio.create_task(session_cleanup_worker())
 

@@ -1,10 +1,10 @@
 """
 MIRRAGE Concurrency & Slot Race Condition Tests
 
-Verifies CRITICAL requirement #2:
-- Exactly maximum 3 concurrent active sessions allowed
-- Under 10+ simultaneous start requests, ACTIVE_SESSIONS <= 3 ALWAYS
-- No request creates a 4th active session
+Verifies CRITICAL requirement:
+- Exactly maximum 5 concurrent active sessions allowed
+- Under 10+ simultaneous start requests, ACTIVE_SESSIONS <= 5 ALWAYS
+- No request creates a 6th active session
 - If Kubernetes provisioning fails, the slot is cleanly released
 """
 import asyncio
@@ -20,13 +20,13 @@ from backend.app.services.k8s_service import k8s_provisioner
 
 
 @pytest.mark.asyncio
-async def test_concurrent_10_session_starts_strictly_limited_to_3(db_session):
+async def test_concurrent_10_session_starts_strictly_limited_to_5(db_session):
     """
     Launch 10 simultaneous session-start requests for 10 distinct users.
     Assert that:
-    1. Maximum 3 sessions are successfully created (HTTP 201).
-    2. Remaining 7 requests are cleanly rejected (HTTP 503 Slot Limit Exceeded).
-    3. Exactly 3 active sessions exist in the database.
+    1. Maximum 5 sessions are successfully created (HTTP 201).
+    2. Remaining 5 requests are cleanly rejected (HTTP 503 Slot Limit Exceeded).
+    3. Exactly 5 active sessions exist in the database.
     """
     # 1. Create 10 distinct users and tokens
     users = []
@@ -55,7 +55,6 @@ async def test_concurrent_10_session_starts_strictly_limited_to_3(db_session):
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        # Define concurrent request coroutine
         async def start_for_user(tok: str):
             return await client.post(
                 f"{settings.API_V1_STR}/session/start",
@@ -72,10 +71,10 @@ async def test_concurrent_10_session_starts_strictly_limited_to_3(db_session):
     success_count = status_codes.count(201)
     slot_exceeded_count = status_codes.count(503)
 
-    assert success_count == 3, f"Expected exactly 3 successes, got {success_count}. Codes: {status_codes}"
-    assert slot_exceeded_count == 7, f"Expected exactly 7 slot exceeded (503), got {slot_exceeded_count}"
+    assert success_count == 5, f"Expected exactly 5 successes, got {success_count}. Codes: {status_codes}"
+    assert slot_exceeded_count == 5, f"Expected exactly 5 slot exceeded (503), got {slot_exceeded_count}"
 
-    # 5. Verify database invariant: ACTIVE_SESSIONS <= 3
+    # 5. Verify database invariant: ACTIVE_SESSIONS <= 5
     from sqlalchemy import func, select
     query = select(func.count(GameSession.id)).where(
         GameSession.status.in_([
@@ -87,7 +86,7 @@ async def test_concurrent_10_session_starts_strictly_limited_to_3(db_session):
     )
     result = await db_session.execute(query)
     active_count = result.scalar()
-    assert active_count == 3, f"Expected 3 active sessions in DB, found {active_count}"
+    assert active_count == 5, f"Expected 5 active sessions in DB, found {active_count}"
 
 
 @pytest.mark.asyncio
@@ -116,10 +115,10 @@ async def test_slot_released_when_k8s_provisioning_fails(
         data = fail_resp.json()
         assert data["code"] == "SESSION_PROVISION_ERROR"
 
-        # Check that slot availability is still 3 (slot was not leaked)
+        # Check that slot availability is still 5 (slot was not leaked)
         slots_resp = await async_client.get(f"{settings.API_V1_STR}/session/slots")
         assert slots_resp.status_code == 200
-        assert slots_resp.json()["available_slots"] == 3
+        assert slots_resp.json()["available_slots"] == 5
 
     finally:
         # Restore mock k8s to normal

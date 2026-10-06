@@ -9,6 +9,6 @@ export interface ActivityLog {
   timestamp: string;
 }
 
-export async function getActivity(limit = 50, offset = 0): Promise<ActivityLog[]> {
+export async function getActivity(limit = 20, offset = 0): Promise<ActivityLog[]> {
   return api.get<ActivityLog[]>(`/api/v1/activity/?limit=${limit}&offset=${offset}`);
 }

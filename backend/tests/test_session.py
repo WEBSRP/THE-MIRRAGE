@@ -10,8 +10,8 @@ async def test_get_slots_info(async_client: AsyncClient):
     response = await async_client.get(f"{settings.API_V1_STR}/session/slots")
     assert response.status_code == 200
     data = response.json()
-    assert data["total_slots"] == 3
-    assert data["available_slots"] <= 3
+    assert data["total_slots"] == 5
+    assert data["available_slots"] <= 5
     assert "is_slot_available" in data
 
 

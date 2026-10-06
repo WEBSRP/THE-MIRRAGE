@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import random
 import time
 from abc import ABC, abstractmethod
@@ -28,18 +29,85 @@ class KubernetesService(ABC):
 
 class ProductionKubernetesService(KubernetesService):
     def __init__(self):
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
+        loaded = False
+        kubeconfig_path = getattr(settings, "K8S_KUBECONFIG_PATH", None)
+        if kubeconfig_path:
+            kubeconfig_path = os.path.expanduser(kubeconfig_path)
+            if os.path.exists(kubeconfig_path):
+                try:
+                    config.load_kube_config(config_file=kubeconfig_path)
+                    loaded = True
+                except Exception as e:
+                    logger.warning(f"Could not load kubeconfig from {kubeconfig_path}: {e}")
+        if not loaded:
+            for default_path in [os.path.expanduser("~/.kube/config"), "/etc/rancher/k3s/k3s.yaml"]:
+                if os.path.exists(default_path):
+                    try:
+                        config.load_kube_config(config_file=default_path)
+                        loaded = True
+                        break
+                    except Exception:
+                        pass
+        if not loaded:
+            try:
+                config.load_incluster_config()
+                loaded = True
+            except config.ConfigException:
+                pass
+        if not loaded:
             try:
                 config.load_kube_config()
+                loaded = True
             except config.ConfigException:
                 logger.warning("Could not load Kubernetes configuration. K8s features will fail.")
         
         self.core_v1 = client.CoreV1Api()
         self.namespace = settings.K8S_NAMESPACE
+
+    def _ensure_namespace_and_sa(self):
+        try:
+            self.core_v1.read_namespace(name=self.namespace)
+        except ApiException as e:
+            if e.status == 404:
+                try:
+                    ns_body = client.V1Namespace(
+                        metadata=client.V1ObjectMeta(
+                            name=self.namespace,
+                            labels={
+                                "app.kubernetes.io/name": "mirrage-sessions",
+                                "mirrage.io/purpose": "player-sandboxes"
+                            }
+                        )
+                    )
+                    self.core_v1.create_namespace(body=ns_body)
+                    logger.info(f"Created namespace {self.namespace}")
+                except ApiException as create_err:
+                    if create_err.status != 409:
+                        raise
+            else:
+                raise
+
+        try:
+            self.core_v1.read_namespaced_service_account(name="mirrage-player-sandbox", namespace=self.namespace)
+        except ApiException as e:
+            if e.status == 404:
+                try:
+                    sa_body = client.V1ServiceAccount(
+                        metadata=client.V1ObjectMeta(
+                            name="mirrage-player-sandbox",
+                            namespace=self.namespace
+                        )
+                    )
+                    self.core_v1.create_namespaced_service_account(namespace=self.namespace, body=sa_body)
+                    logger.info(f"Created serviceaccount mirrage-player-sandbox in {self.namespace}")
+                except ApiException as sa_err:
+                    if sa_err.status != 409:
+                        raise
+            else:
+                raise
     
     async def provision_player_pod(self, session_id: str, user_id: str, username: str) -> Tuple[str, str, str]:
+        self._ensure_namespace_and_sa()
         pod_name = f"player-{session_id.lower()}-{int(time.time())}"
         
         container_security_context = client.V1SecurityContext(
@@ -53,6 +121,19 @@ class ProductionKubernetesService(KubernetesService):
             seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault")
         )
 
+        mirage_readiness = client.V1Probe(
+            tcp_socket=client.V1TCPSocketAction(port=22),
+            initial_delay_seconds=2,
+            period_seconds=2,
+            failure_threshold=15
+        )
+        ctf_readiness = client.V1Probe(
+            tcp_socket=client.V1TCPSocketAction(port=2222),
+            initial_delay_seconds=2,
+            period_seconds=2,
+            failure_threshold=15
+        )
+
         mirage_container = client.V1Container(
             name="mirage",
             image=settings.MIRAGE_CONTAINER_IMAGE,
@@ -61,6 +142,10 @@ class ProductionKubernetesService(KubernetesService):
                 limits={"cpu": "200m", "memory": "256Mi"}
             ),
             security_context=container_security_context,
+            readiness_probe=mirage_readiness,
+            ports=[
+                client.V1ContainerPort(container_port=22, name="mirage-ssh")
+            ],
             env=[
                 client.V1EnvVar(name="USERNAME", value=username)
             ]
@@ -73,16 +158,22 @@ class ProductionKubernetesService(KubernetesService):
             resources=client.V1ResourceRequirements(
                 limits={"cpu": "300m", "memory": "512Mi"}
             ),
-            security_context=container_security_context
+            security_context=container_security_context,
+            readiness_probe=ctf_readiness,
+            ports=[
+                client.V1ContainerPort(container_port=2222, name="ctf-internal")
+            ]
         )
         
         pod = client.V1Pod(
             metadata=client.V1ObjectMeta(
                 name=pod_name,
                 labels={
-                    "app.kubernetes.io/name": "mirrage-player",
-                    "mirrage.io/session-id": session_id,
-                    "mirrage.io/user-id": user_id
+                    "app": "mirrage-session",
+                    "app.kubernetes.io/name": "mirrage-session",
+                    "session": str(session_id),
+                    "mirrage.io/session-id": str(session_id),
+                    "mirrage.io/user-id": str(user_id)
                 }
             ),
             spec=client.V1PodSpec(
@@ -107,10 +198,19 @@ class ProductionKubernetesService(KubernetesService):
         for _ in range(60):
             try:
                 current_pod = self.core_v1.read_namespaced_pod(name=pod_name, namespace=self.namespace)
-                if current_pod.status.phase == "Running" and current_pod.status.pod_ip:
-                    pod_ip = current_pod.status.pod_ip
-                    logger.info(f"Pod {pod_name} is running with IP {pod_ip}")
-                    return pod_name, pod_ip, pod_ip
+                phase = current_pod.status.phase
+                pod_ip = current_pod.status.pod_ip
+                if phase == "Running" and pod_ip:
+                    conditions = current_pod.status.conditions or []
+                    ready_cond = any(c.type == "Ready" and c.status == "True" for c in conditions)
+                    c_statuses = current_pod.status.container_statuses or []
+                    all_c_ready = len(c_statuses) >= 2 and all(cs.ready for cs in c_statuses)
+
+                    if ready_cond and all_c_ready:
+                        logger.info(f"Pod {pod_name} is running and ready with IP {pod_ip}")
+                        return pod_name, pod_ip, pod_ip
+                elif phase in ("Failed", "Unknown"):
+                    raise RuntimeError(f"Pod {pod_name} entered terminal phase: {phase}")
                 await asyncio.sleep(2)
             except ApiException as e:
                 logger.error(f"Error checking pod status: {e}")
@@ -136,16 +236,30 @@ class ProductionKubernetesService(KubernetesService):
     async def get_pod_status(self, pod_name: str) -> Optional[dict]:
         try:
             pod = self.core_v1.read_namespaced_pod(name=pod_name, namespace=self.namespace)
+            conditions = pod.status.conditions or []
+            ready_cond = any(c.type == "Ready" and c.status == "True" for c in conditions)
+            c_statuses = pod.status.container_statuses or []
+            all_c_ready = len(c_statuses) >= 2 and all(cs.ready for cs in c_statuses)
+            is_ready = (pod.status.phase == "Running") and bool(pod.status.pod_ip) and ready_cond and all_c_ready
+
+            labels = pod.metadata.labels or {}
+            session_id = labels.get("mirrage.io/session-id") or labels.get("session")
+            user_id = labels.get("mirrage.io/user-id")
+
             return {
                 "phase": pod.status.phase,
                 "ip": pod.status.pod_ip,
-                "start_time": pod.status.start_time
+                "ready": is_ready,
+                "start_time": pod.status.start_time,
+                "labels": labels,
+                "session_id": session_id,
+                "user_id": user_id,
             }
         except ApiException as e:
             if e.status == 404:
                 return None
             logger.error(f"Exception reading pod status: {e}")
-            return None
+            raise
 
 
 class MockKubernetesService(KubernetesService):
@@ -166,7 +280,17 @@ class MockKubernetesService(KubernetesService):
         self.pods[pod_name] = {
             "phase": "Creating",
             "ip": None,
-            "start_time": time.time()
+            "ready": False,
+            "start_time": time.time(),
+            "labels": {
+                "app": "mirrage-session",
+                "app.kubernetes.io/name": "mirrage-session",
+                "session": str(session_id),
+                "mirrage.io/session-id": str(session_id),
+                "mirrage.io/user-id": str(user_id),
+            },
+            "session_id": str(session_id),
+            "user_id": str(user_id),
         }
         
         # Simulate network delay
@@ -174,6 +298,7 @@ class MockKubernetesService(KubernetesService):
         
         if self.simulate_readiness_timeout:
             self.pods[pod_name]["phase"] = "Failed"
+            self.pods[pod_name]["ready"] = False
             raise TimeoutError(f"Pod {pod_name} did not become ready in time.")
             
         ip = f"10.42.0.{self._next_ip}"
@@ -181,7 +306,8 @@ class MockKubernetesService(KubernetesService):
         
         self.pods[pod_name].update({
             "phase": "Running",
-            "ip": ip
+            "ip": ip,
+            "ready": True,
         })
         
         logger.info(f"Mock provisioned pod {pod_name} with IP {ip}")
@@ -196,6 +322,7 @@ class MockKubernetesService(KubernetesService):
         
         if pod_name in self.pods:
             self.pods[pod_name]["phase"] = "Terminated"
+            self.pods[pod_name]["ready"] = False
             del self.pods[pod_name]
             logger.info(f"Mock deleted pod {pod_name}")
             return True

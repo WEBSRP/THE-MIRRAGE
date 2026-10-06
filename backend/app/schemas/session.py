@@ -16,6 +16,7 @@ class SessionResponse(BaseModel):
     mirage_port: int = 22
     player_vpn_ip: Optional[str] = None
     expires_at: Optional[datetime] = None
+    initialization_deadline: Optional[datetime] = None
     time_remaining_seconds: Optional[int] = None
     message: Optional[str] = None
 
@@ -31,6 +32,7 @@ class SessionStatusResponse(BaseModel):
     created_at: datetime
     ready_at: Optional[datetime] = None
     expires_at: datetime
+    initialization_deadline: Optional[datetime] = None
     last_active_at: datetime
     time_remaining_seconds: int
     is_ready: bool

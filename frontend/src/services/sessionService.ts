@@ -2,11 +2,12 @@ import { api } from './api';
 
 export interface SessionResponse {
   session_id: string;
-  mirage_ip: string;
+  mirage_ip?: string | null;
   status: 'pending' | 'initializing' | 'provisioning' | 'ready' | 'stopping' | 'terminated' | 'expired' | 'error';
   mirage_port?: number;
   player_vpn_ip?: string;
   expires_at?: string;
+  initialization_deadline?: string | null;
   time_remaining_seconds?: number;
   message?: string;
 }
@@ -14,12 +15,13 @@ export interface SessionResponse {
 export interface SessionStatusResponse {
   session_id: string;
   status: string;
-  mirage_ip: string;
+  mirage_ip?: string | null;
   mirage_port: number;
   player_vpn_ip: string;
   created_at: string;
   ready_at: string | null;
   expires_at: string;
+  initialization_deadline?: string | null;
   last_active_at: string;
   time_remaining_seconds: number;
   is_ready: boolean;

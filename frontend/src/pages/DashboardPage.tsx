@@ -6,6 +6,110 @@ import { getVpnStatus, downloadVpnConfig, downloadSignalConfig, type VpnStatus }
 import { getSessionStatus, type SessionStatusResponse } from '../services/sessionService';
 import { getActivity, type ActivityLog } from '../services/activityService';
 
+/** Maximum number of meaningful activity items to show on the dashboard. */
+const ACTIVITY_DISPLAY_LIMIT = 5;
+
+/**
+ * Map raw backend event types to clean, human-readable labels.
+ * Internal/technical events that shouldn't be shown on the dashboard
+ * are mapped to `null`.
+ */
+const EVENT_LABEL_MAP: Record<string, string | null> = {
+  session_start: 'Environment started',
+  session_stop: 'Environment stopped',
+  vpn_connect: 'VPN connected',
+  vpn_disconnect: 'VPN disconnected',
+  flag_submission: 'Flag submitted',
+  ssh_auth_attempt: null,   // Internal — hide from dashboard
+  ssh_command: null,         // Internal — hide from dashboard
+  honeypot_trigger: null,    // Internal — hide from dashboard
+  deception_discovery: null, // Internal — hide from dashboard
+};
+
+/** Returns a human-readable label for an activity event, or `null` to hide it. */
+function getEventLabel(activity: ActivityLog): string | null {
+  const mapped = EVENT_LABEL_MAP[activity.event_type];
+  if (mapped !== undefined) return mapped;
+  // Unknown event types — hide rather than expose raw names
+  return null;
+}
+
+/**
+ * Format a timestamp into a concise, human-readable relative string.
+ *
+ * Examples: "Just now", "2 min ago", "Today · 11:36", "Yesterday · 18:42"
+ */
+function formatRelativeTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+
+  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+
+  // Check if same calendar day
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  if (isToday) return `Today · ${timeStr}`;
+
+  // Check yesterday
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday =
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear();
+
+  if (isYesterday) return `Yesterday · ${timeStr}`;
+
+  // Older — show short date
+  if (diffHours < 168) {
+    // Within a week — show weekday
+    const weekday = date.toLocaleDateString([], { weekday: 'short' });
+    return `${weekday} · ${timeStr}`;
+  }
+
+  // Older than a week — show date
+  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${dateStr} · ${timeStr}`;
+}
+
+/**
+ * Process raw activity logs into clean, deduplicated dashboard items.
+ *
+ * - Filters out internal/technical events
+ * - Collapses consecutive events of the same type
+ * - Limits to ACTIVITY_DISPLAY_LIMIT items
+ */
+function processActivities(raw: ActivityLog[]): { label: string; timestamp: string; id: string }[] {
+  const items: { label: string; timestamp: string; id: string }[] = [];
+
+  for (const activity of raw) {
+    const label = getEventLabel(activity);
+    if (label === null) continue;
+
+    // Deduplicate: skip if the previous visible item has the same label
+    if (items.length > 0 && items[items.length - 1].label === label) continue;
+
+    items.push({
+      label,
+      timestamp: activity.timestamp,
+      id: activity.id,
+    });
+
+    if (items.length >= ACTIVITY_DISPLAY_LIMIT) break;
+  }
+
+  return items;
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const { theme } = useTheme();
@@ -70,10 +174,11 @@ export function DashboardPage() {
     ? `MIRAGE-${sessionStatus.session_id.substring(0, 4).toUpperCase()}`
     : 'MIRAGE-7F31';
 
-  const envIp = sessionStatus?.mirage_ip || '10.42.0.17';
-
-  const isSessionOnline = sessionStatus?.status === 'active' || sessionStatus?.status === 'running' || sessionStatus?.status === 'ready';
+  const isSessionOnline = !!sessionStatus?.is_ready && (sessionStatus?.status === 'active' || sessionStatus?.status === 'running' || sessionStatus?.status === 'ready');
   const isSessionInitializing = sessionStatus?.status === 'initializing' || sessionStatus?.status === 'provisioning' || sessionStatus?.status === 'pending';
+  const envIp = isSessionOnline && sessionStatus?.mirage_ip ? sessionStatus.mirage_ip : null;
+
+  const displayActivities = processActivities(activities);
 
   return (
     <div className="flex flex-col gap-8">
@@ -113,9 +218,11 @@ export function DashboardPage() {
                   </span>
                 )}
               </div>
-              <span className="font-mono text-sm text-[var(--text-muted)]">
-                {envIp}
-              </span>
+              {isSessionOnline && envIp && (
+                <span className="font-mono text-sm text-[var(--text-muted)]">
+                  {envIp}
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs">
@@ -202,33 +309,20 @@ export function DashboardPage() {
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-1">
           {isLoading ? (
             <div className="p-4 text-sm text-[var(--text-muted)] text-center">Loading activity...</div>
-          ) : activities.length > 0 ? (
+          ) : displayActivities.length > 0 ? (
             <ul className="flex flex-col">
-              {activities.map((activity, idx) => {
-                const date = new Date(activity.timestamp);
-                const isPositive = activity.event_type === 'challenge_solve' || activity.event_type === 'flag_submit';
-                const details = activity.payload ? JSON.stringify(activity.payload) : '';
-
-                return (
-                  <li
-                    key={activity.id || idx}
-                    className={`flex items-start gap-4 p-3 ${idx !== activities.length - 1 ? 'border-b border-[var(--border)]' : ''}`}
-                  >
-                    <span className="font-mono text-[11px] text-[var(--text-faint)] pt-0.5 whitespace-nowrap w-12">
-                      {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                    </span>
-                    <div className="flex items-center pt-1.5">
-                      <span className={`w-2 h-2 rounded-full ${isPositive ? 'bg-[var(--success)]' : 'bg-[var(--accent)]'}`}></span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-sm text-[var(--text)]">{activity.summary || activity.event_type || 'Unknown activity'}</span>
-                      {details && details !== '{}' && (
-                        <span className="text-xs text-[var(--text-muted)] mt-0.5 truncate max-w-sm">{details}</span>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+              {displayActivities.map((item, idx) => (
+                <li
+                  key={item.id}
+                  className={`flex items-center gap-3 px-3 py-2.5 ${idx !== displayActivities.length - 1 ? 'border-b border-[var(--border)]' : ''}`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0"></span>
+                  <span className="text-sm text-[var(--text)] flex-1">{item.label}</span>
+                  <span className="font-mono text-[11px] text-[var(--text-faint)] whitespace-nowrap">
+                    {formatRelativeTime(item.timestamp)}
+                  </span>
+                </li>
+              ))}
             </ul>
           ) : (
             <div className="p-8 text-sm text-[var(--text-muted)] text-center flex flex-col items-center gap-2">

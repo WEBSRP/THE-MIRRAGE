@@ -63,21 +63,62 @@ echo
 # ------------------------------------------------------------
 # 3. MIRRAGE Active Player Sessions & Pod Lifecycle
 # ------------------------------------------------------------
-echo "┌─ MIRRAGE PLAYER SESSIONS"
+echo "┌─ MIRRAGE PLAYER SESSIONS & RECONCILIATION"
 echo "│"
 
+# 3a. Active Sessions from Database
+PYTHON_BIN="/home/admin/THE-MIRRAGE/backend/.venv/bin/python3"
+PROJECT_DIR="/home/admin/THE-MIRRAGE"
+DB_SESSIONS=""
+
+if [ -x "$PYTHON_BIN" ]; then
+    DB_SESSIONS=$(PYTHONPATH="$PROJECT_DIR" "$PYTHON_BIN" -c "
+import asyncio
+from backend.app.core.database import AsyncSessionLocal
+from backend.app.models.session import GameSession, SessionStatus
+from sqlalchemy import select
+
+async def main():
+    try:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(select(GameSession).where(GameSession.status.in_([
+                SessionStatus.PENDING, SessionStatus.INITIALIZING, SessionStatus.PROVISIONING, SessionStatus.READY
+            ])))
+            sessions = res.scalars().all()
+            for s in sessions:
+                print(f'{s.id}|{s.user_id}|{s.status.value}|{s.pod_name or \"-\"}|{s.mirage_ip or \"-\"}')
+    except Exception as e:
+        pass
+
+asyncio.run(main())
+" 2>/dev/null || true)
+fi
+
+echo "│ • Database Sessions (Active in DB):"
+if [ -z "$DB_SESSIONS" ]; then
+    echo "│   No active sessions recorded in database."
+else
+    printf "│   %-18s %-14s %-28s %-16s\n" "SESSION ID" "STATUS" "POD NAME" "TARGET IP"
+    echo "│   ---------------------------------------------------------------------------------"
+    echo "$DB_SESSIONS" | while IFS='|' read -r sid uid status pod ip; do
+        printf "│   %-18s %-14s %-28s %-16s\n" "$sid" "$status" "$pod" "$ip"
+    done
+fi
+
+echo "│"
+echo "│ • Kubernetes Session Pods (Live on Cluster):"
 SESSION_PODS=$($KUBECTL get pods -A -l app=mirrage-session --no-headers 2>/dev/null || true)
 if [ -z "$SESSION_PODS" ]; then
-    # Fallback search for player pods by naming pattern
     SESSION_PODS=$($KUBECTL get pods -A --no-headers 2>/dev/null | grep -E "player-" || true)
 fi
 
+POD_NAMES=""
 if [ -z "$SESSION_PODS" ]; then
-    echo "│ Zero active player sessions (Cluster idle - Ready for incoming players)"
+    echo "│   Zero active player pods (Cluster idle - Ready for incoming players)"
 else
-    printf "│ %-14s %-28s %-8s %-12s %-16s %s\n" \
+    printf "│   %-14s %-28s %-8s %-12s %-16s %s\n" \
         "NAMESPACE" "POD NAME" "READY" "STATUS" "POD IP" "NODE"
-    echo "│ -----------------------------------------------------------------------------------------"
+    echo "│   ---------------------------------------------------------------------------------"
 
     echo "$SESSION_PODS" | while read -r line; do
         ns=$(echo "$line" | awk '{print $1}')
@@ -87,9 +128,59 @@ else
         ip=$($KUBECTL get pod "$name" -n "$ns" -o jsonpath='{.status.podIP}' 2>/dev/null || echo "-")
         node=$($KUBECTL get pod "$name" -n "$ns" -o jsonpath='{.spec.nodeName}' 2>/dev/null || echo "-")
 
-        printf "│ %-14s %-28s %-8s %-12s %-16s %s\n" \
+        printf "│   %-14s %-28s %-8s %-12s %-16s %s\n" \
             "$ns" "$name" "$ready" "$status" "${ip:-"-"}" "${node:-"-"}"
     done
+fi
+
+# 3c. Consistency & Reconciliation Analysis
+echo "│"
+echo "│ • State Consistency Analysis:"
+INCONSISTENCY_FOUND=0
+
+if [ -n "$DB_SESSIONS" ]; then
+    while IFS='|' read -r sid uid status pod ip; do
+        [ -z "$sid" ] && continue
+        if [ "$pod" = "-" ] || [ -z "$pod" ]; then
+            echo "│   [!] INCONSISTENCY: Session $sid has DB status '$status' but no Kubernetes pod allocated."
+            INCONSISTENCY_FOUND=1
+        else
+            pod_exists=$(echo "$SESSION_PODS" | awk '{print $2}' | grep -Fx "$pod" || true)
+            if [ -z "$pod_exists" ]; then
+                pod_exists=$($KUBECTL get pods -A --no-headers 2>/dev/null | awk '{print $2}' | grep -Fx "$pod" || true)
+            fi
+            if [ -z "$pod_exists" ]; then
+                if [ "$status" = "ready" ]; then
+                    echo "│   [!] STALE SESSION: DB says READY for session $sid ($ip) but pod $pod DOES NOT EXIST in Kubernetes!"
+                else
+                    echo "│   [!] ORPHANED DB SESSION: DB says '$status' for session $sid but pod $pod does not exist in Kubernetes."
+                fi
+                INCONSISTENCY_FOUND=1
+            fi
+        fi
+    done <<< "$DB_SESSIONS"
+fi
+
+if [ -n "$SESSION_PODS" ]; then
+    while read -r line; do
+        [ -z "$line" ] && continue
+        pname=$(echo "$line" | awk '{print $2}')
+        if [ -n "$DB_SESSIONS" ]; then
+            matched=$(echo "$DB_SESSIONS" | grep -F "$pname" || true)
+        else
+            matched=""
+        fi
+        if [ -z "$matched" ]; then
+            echo "│   [!] ORPHANED KUBERNETES RESOURCE: Pod $pname is running on cluster but has no active DB session."
+            INCONSISTENCY_FOUND=1
+        fi
+    done <<< "$SESSION_PODS"
+fi
+
+if [ -z "$DB_SESSIONS" ] && [ -z "$SESSION_PODS" ]; then
+    echo "│   [✓] Consistent: No active DB sessions and no active K8s pods. Cluster is cleanly idle."
+elif [ "$INCONSISTENCY_FOUND" -eq 0 ]; then
+    echo "│   [✓] Consistent: Database active sessions match live Kubernetes resources."
 fi
 
 echo "│"

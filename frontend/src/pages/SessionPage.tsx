@@ -106,7 +106,7 @@ export function SessionPage() {
 
         if (statusRes) {
           const backendStatus = statusRes.status;
-          const isBackendReady = statusRes.is_ready || backendStatus === 'ready' || backendStatus === 'active';
+          const isBackendReady = !!statusRes.is_ready && (backendStatus === 'ready' || backendStatus === 'active');
           const isInProgress =
             backendStatus === 'initializing' ||
             backendStatus === 'pending' ||
@@ -115,28 +115,23 @@ export function SessionPage() {
           if (isBackendReady || isInProgress) {
             setSessionData(statusRes);
 
-            // Calculate how much of the mandatory 3-minute window remains
-            const createdAtMs = statusRes.created_at
-              ? new Date(statusRes.created_at).getTime()
-              : Date.now();
-            const elapsedMs = Math.max(0, Date.now() - createdAtMs);
-            const remainingMs = Math.max(0, TOTAL_COUNTDOWN_MS - elapsedMs);
+            const deadlineMs = statusRes.initialization_deadline
+              ? new Date(statusRes.initialization_deadline).getTime()
+              : (statusRes.created_at ? new Date(statusRes.created_at).getTime() + TOTAL_COUNTDOWN_MS : Date.now());
+            const remainingMs = Math.max(0, deadlineMs - Date.now());
 
             if (remainingMs > 0) {
-              // 3-minute window still active — show initializing with reconstructed countdown
               setBackendReady(isBackendReady);
               setSessionStatus('initializing');
-              setInitializationDeadline(Date.now() + remainingMs);
+              setInitializationDeadline(deadlineMs);
               setTimeRemainingMs(remainingMs);
             } else if (isBackendReady) {
-              // 3-minute window has passed AND backend is ready — go straight to ready
               setBackendReady(true);
               setSessionStatus('ready');
             } else {
-              // 3 minutes exceeded but backend still not ready
               setBackendReady(false);
-              setSessionStatus('initializing');
-              // Keep polling with 0 remaining — the UI will show "still initializing"
+              setSessionStatus('failed');
+              setError('Environment did not report ready within the allocated 3-minute window.');
               setInitializationDeadline(null);
               setTimeRemainingMs(0);
             }
@@ -145,11 +140,19 @@ export function SessionPage() {
           }
         }
 
-        // No active session found
+        // Stale or stopped session: clean up any target info
+        setSessionData(null);
+        setBackendReady(false);
+        setVpnStatus('unknown');
+        setVpnTunnelIp(null);
         setSessionStatus('idle');
         setIsCheckingInitial(false);
       } catch {
         if (mounted) {
+          setSessionData(null);
+          setBackendReady(false);
+          setVpnStatus('unknown');
+          setVpnTunnelIp(null);
           setSessionStatus('idle');
           setIsCheckingInitial(false);
         }
@@ -196,9 +199,11 @@ export function SessionPage() {
         if (backendReadyRef.current) {
           // BOTH conditions met: countdown done AND backend ready → show READY
           setSessionStatus('ready');
+        } else {
+          // Timeout reached without backend ready
+          setSessionStatus('failed');
+          setError('Environment did not report ready within the allocated 3-minute window.');
         }
-        // If backend NOT ready yet, stay in 'initializing' with timeRemainingMs=0.
-        // The polling effect continues and will transition to ready once backend confirms.
       }
     };
 
@@ -213,14 +218,6 @@ export function SessionPage() {
   // ════════════════════════════════════════════════════════════════════
   // 3. SESSION STATUS POLLING — runs during 'initializing'
   // ════════════════════════════════════════════════════════════════════
-  //
-  // When backend reports READY:
-  //   - Set backendReady = true
-  //   - Do NOT change sessionStatus to 'ready'
-  //   - The countdown or post-countdown logic handles that transition
-  //
-  // When backend reports ERROR/TERMINATED/EXPIRED:
-  //   - Immediately abort → show error
   useEffect(() => {
     if (sessionStatus !== 'initializing') {
       clearSessionPoll();
@@ -234,7 +231,7 @@ export function SessionPage() {
         const res = await getSessionStatus();
         if (!active) return;
 
-        if (res.is_ready || res.status === 'ready' || res.status === 'active') {
+        if (res.is_ready && (res.status === 'ready' || res.status === 'active')) {
           // Backend is ready — record this, but do NOT skip the countdown
           setBackendReady(true);
           setSessionData(res);
@@ -245,7 +242,6 @@ export function SessionPage() {
             clearSessionPoll();
             setSessionStatus('ready');
           }
-          // Otherwise: countdown is still running, stay in 'initializing'
           return;
         }
 
@@ -258,7 +254,9 @@ export function SessionPage() {
           setSessionStatus('idle');
           setError(
             res.status === 'terminated'
-              ? 'Environment was terminated. The session pod may no longer exist.'
+              ? 'Environment was terminated. The session pod no longer exists.'
+              : res.status === 'expired'
+              ? 'Session expired. You can start a new environment.'
               : 'The environment encountered an error during provisioning.'
           );
           return;
@@ -355,9 +353,18 @@ export function SessionPage() {
           setVpnTunnelIp(null);
           setSessionStatus('idle');
           setError('Environment was terminated. The session pod no longer exists.');
-        } else if (res.is_ready || res.status === 'ready' || res.status === 'active') {
+        } else if (res.is_ready && (res.status === 'ready' || res.status === 'active')) {
           // Session still alive — update metadata (IP may have changed)
           setSessionData(res);
+        } else if (!res.is_ready) {
+          clearHealthPoll();
+          clearVpnPoll();
+          setBackendReady(false);
+          setSessionData(null);
+          setVpnStatus('unknown');
+          setVpnTunnelIp(null);
+          setSessionStatus('idle');
+          setError('Environment is no longer ready. The session pod may have disappeared.');
         }
       } catch {
         // Transient error — keep polling. Next check will detect if session is gone.
@@ -390,16 +397,16 @@ export function SessionPage() {
       const res = await createSession();
       setSessionData(res);
 
-      // ALWAYS enter the mandatory 3-minute initialization window.
-      // Even if the backend immediately reports 'ready', the UI must show
-      // the full countdown. Backend readiness is tracked separately.
       if (res.status === 'ready') {
         setBackendReady(true);
       }
       setSessionStatus('initializing');
-      const deadline = Date.now() + TOTAL_COUNTDOWN_MS;
+      const deadline = res.initialization_deadline
+        ? new Date(res.initialization_deadline).getTime()
+        : Date.now() + TOTAL_COUNTDOWN_MS;
       setInitializationDeadline(deadline);
-      setTimeRemainingMs(TOTAL_COUNTDOWN_MS);
+      const remaining = Math.max(0, deadline - Date.now());
+      setTimeRemainingMs(remaining > 0 ? remaining : TOTAL_COUNTDOWN_MS);
     } catch (err: unknown) {
       const apiErr = err as { message?: string; detail?: string };
       const msg =
@@ -468,22 +475,21 @@ export function SessionPage() {
     try {
       const res = await getSessionStatus();
       setSessionData(res);
-      const isReady = res.is_ready || res.status === 'ready' || res.status === 'active';
+      const isReady = !!res.is_ready && (res.status === 'ready' || res.status === 'active');
 
       if (isReady) {
-        // Backend is ready — check if 3-minute window has passed
-        const createdAtMs = res.created_at ? new Date(res.created_at).getTime() : 0;
-        const elapsedMs = Date.now() - createdAtMs;
+        const deadlineMs = res.initialization_deadline
+          ? new Date(res.initialization_deadline).getTime()
+          : (res.created_at ? new Date(res.created_at).getTime() + TOTAL_COUNTDOWN_MS : 0);
+        const remainingMs = Math.max(0, deadlineMs - Date.now());
 
-        if (elapsedMs >= TOTAL_COUNTDOWN_MS) {
+        if (remainingMs <= 0) {
           setBackendReady(true);
           setSessionStatus('ready');
         } else {
-          // Still within the 3-minute window — show remaining countdown
-          const remainingMs = Math.max(0, TOTAL_COUNTDOWN_MS - elapsedMs);
           setBackendReady(true);
           setSessionStatus('initializing');
-          setInitializationDeadline(Date.now() + remainingMs);
+          setInitializationDeadline(deadlineMs);
           setTimeRemainingMs(remainingMs);
         }
       } else if (
@@ -493,13 +499,17 @@ export function SessionPage() {
       ) {
         setBackendReady(false);
         setSessionStatus('initializing');
-        const deadline = Date.now() + 60000; // Give an extra minute
+        const deadline = Date.now() + 60000;
         setInitializationDeadline(deadline);
         setTimeRemainingMs(60000);
       } else {
+        setSessionData(null);
+        setBackendReady(false);
         setSessionStatus('idle');
       }
     } catch {
+      setSessionData(null);
+      setBackendReady(false);
       setError('Could not reach active session. You can start a new environment.');
       setSessionStatus('idle');
     }
@@ -515,8 +525,8 @@ export function SessionPage() {
     }
   };
 
-  const mirageIp = sessionData?.mirage_ip || '10.42.0.17';
-  const miragePort = sessionData?.mirage_port || 22;
+  const mirageIp = sessionData?.mirage_ip || '';
+  const ctfUrl = mirageIp ? `http://${mirageIp}:80` : '';
 
   // Whether the countdown has reached zero
   const countdownComplete = timeRemainingMs <= 0 && !initializationDeadline;
@@ -674,30 +684,30 @@ export function SessionPage() {
         {/* ─── STATE 4: READY (VPN Instructions & Profile Download) ─── */}
         {!isCheckingInitial && sessionStatus === 'ready' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Target Gateway Card */}
+            {/* CTF Target Card */}
             <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
-                  TARGET GATEWAY
+                  CTF TARGET APPLICATION
                 </span>
                 <span className="font-mono text-[11px] text-[var(--accent)] bg-[var(--accent-subtle)] px-2 py-0.5 rounded">
-                  SSH Port {miragePort}
+                  HTTP Port 80
                 </span>
               </div>
               <div className="flex items-center justify-between mt-2">
                 <span className="font-mono text-xl sm:text-2xl text-[var(--text)] tracking-wider">
-                  {mirageIp}
+                  {ctfUrl || '—'}
                 </span>
                 <button
-                  onClick={() => handleCopyIp(`${mirageIp}`)}
+                  onClick={() => handleCopyIp(ctfUrl)}
                   className="text-xs font-mono text-[var(--text-muted)] hover:text-[var(--text)] transition-colors px-2 py-1 rounded bg-[var(--surface-alt)] cursor-pointer"
-                  title="Copy IP"
+                  title="Copy CTF URL"
                 >
-                  {copiedIp ? 'Copied!' : 'Copy IP'}
+                  {copiedIp ? 'Copied!' : 'Copy URL'}
                 </button>
               </div>
               <p className="text-[11px] text-[var(--text-faint)] mt-2 font-mono">
-                ssh -p {miragePort} mirrage@{mirageIp}
+                {ctfUrl ? `${ctfUrl} (VPN access only)` : 'VPN access only'}
               </p>
             </div>
 

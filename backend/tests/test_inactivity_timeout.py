@@ -130,10 +130,10 @@ async def test_inactivity_expiration_and_cleanup_worker(
     assert session.status == SessionStatus.EXPIRED
     assert session.terminated_at is not None
 
-    # 5. Verify slot is freed (available slots = 3)
+    # 5. Verify slot is freed (available slots = 5)
     slots_resp = await async_client.get(f"{settings.API_V1_STR}/session/slots")
     assert slots_resp.status_code == 200
-    assert slots_resp.json()["available_slots"] == 3
+    assert slots_resp.json()["available_slots"] == 5
 
     # 6. Run cleanup worker AGAIN (idempotence check)
     reaped_again = await session_service.cleanup_expired_sessions(db_session)

@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = "noreply@mirrage.io"
 
     # Session & Slot Management
-    MAX_CONCURRENT_SESSIONS: int = 3
+    MAX_CONCURRENT_SESSIONS: int = 5
     SESSION_TIMEOUT_MINUTES: int = 30
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 60
     INITIALIZATION_SIMULATION_SECONDS: int = 5
@@ -125,9 +125,9 @@ class Settings(BaseSettings):
     K8S_MODE: str = "mock"
     K8S_NAMESPACE: str = "mirrage-sessions"
     K8S_IN_CLUSTER: bool = False
-    K8S_KUBECONFIG_PATH: str = os.path.expanduser("~/.kube/config")
-    MIRAGE_CONTAINER_IMAGE: str = "mirrage/mirage-honeypot:latest"
-    CTF_CONTAINER_IMAGE: str = "mirrage/ctf-core:latest"
+    K8S_KUBECONFIG_PATH: str = os.getenv("K8S_KUBECONFIG_PATH", os.path.expanduser("~/.kube/config"))
+    MIRAGE_CONTAINER_IMAGE: str = "docker.io/library/mirrage-mirrage:latest"
+    CTF_CONTAINER_IMAGE: str = "docker.io/library/mirrage-ctf:latest"
     DEFAULT_POD_SUBNET_PREFIX: str = "10.42.0."
 
     # OpenVPN Engine
