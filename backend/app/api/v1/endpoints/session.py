@@ -79,3 +79,20 @@ async def stop_session(
     Stop the player's active machine, delete the Kubernetes pod, and free the slot.
     """
     return await session_service.stop_session(db=db, user=current_user, session_id=session_id)
+
+
+@router.post(
+    "/extend",
+    response_model=SessionStatusResponse,
+    summary="Extend active session by 1 hour"
+)
+async def extend_session(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Extend the player's active session by 1 hour.
+    The session must be active and not yet expired.
+    Subject to the maximum session duration limit.
+    """
+    return await session_service.extend_session(db=db, user=current_user)
