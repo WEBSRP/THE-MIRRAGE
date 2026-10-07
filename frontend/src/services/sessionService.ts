@@ -50,6 +50,11 @@ export async function terminateSession(sessionId?: string): Promise<SessionRespo
   return api.post<SessionResponse>(`/api/v1/session/stop${query}`);
 }
 
+export async function extendSession(sessionId?: string): Promise<SessionStatusResponse> {
+  const query = sessionId ? `?session_id=${sessionId}` : '';
+  return api.post<SessionStatusResponse>(`/api/v1/session/extend${query}`);
+}
+
 export async function getSlotInfo(): Promise<SlotInfo> {
   return api.get<SlotInfo>('/api/v1/session/slots');
 }

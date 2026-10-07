@@ -117,7 +117,8 @@ class Settings(BaseSettings):
 
     # Session & Slot Management
     MAX_CONCURRENT_SESSIONS: int = 5
-    SESSION_TIMEOUT_MINUTES: int = 30
+    SESSION_TIMEOUT_MINUTES: int = 90
+    SESSION_MAX_DURATION_MINUTES: int = 300  # 5 hours max total lifetime
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 60
     INITIALIZATION_SIMULATION_SECONDS: int = 5
 

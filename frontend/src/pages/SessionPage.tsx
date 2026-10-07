@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { MirrageLogo } from '../components/MirrageLogo';
+import { EnvironmentLeaveGuardModal } from '../components/EnvironmentLeaveGuardModal';
 import {
   createSession,
   getSessionStatus,
   terminateSession,
+  extendSession,
   getSlotInfo,
   type SessionStatusResponse,
   type SessionResponse,
@@ -18,6 +20,8 @@ type VpnConnectionStatus = 'unknown' | 'disconnected' | 'connected';
 const TOTAL_COUNTDOWN_MS = 3 * 60 * 1000; // 3-minute mandatory initialization window
 
 export function SessionPage() {
+  const navigate = useNavigate();
+
   // ── Core lifecycle state ──
   const [sessionStatus, setSessionStatus] = useState<SessionLifecycleStatus>('idle');
   const [vpnStatus, setVpnStatus] = useState<VpnConnectionStatus>('unknown');
@@ -27,6 +31,13 @@ export function SessionPage() {
   // This is the sole source of truth for the frontend timer.
   const [initializationDeadline, setInitializationDeadline] = useState<number | null>(null);
   const [timeRemainingMs, setTimeRemainingMs] = useState<number>(TOTAL_COUNTDOWN_MS);
+
+  // ── Session lifetime countdown & extension state ──
+  // Authoritative 90-minute session expiration countdown derived from backend expires_at
+  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(0);
+  const [isExtending, setIsExtending] = useState(false);
+  const serverTimeOffsetRef = useRef<number>(0);
+  const sessionCountdownIntervalRef = useRef<number | null>(null);
 
   // ── Backend readiness (tracked SEPARATELY from UI lifecycle) ──
   // The pod/infrastructure may become ready long before the 3-minute window ends.
@@ -44,6 +55,12 @@ export function SessionPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState(false);
 
+  // ── Navigation leave guard modal state ──
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [pendingNavDestination, setPendingNavDestination] = useState<string | null>(null);
+  const [isStoppingFromModal, setIsStoppingFromModal] = useState(false);
+  const [modalStopError, setModalStopError] = useState<string | null>(null);
+
   // ── Interval timer refs for reliable cleanup ──
   const countdownIntervalRef = useRef<number | null>(null);
   const sessionPollRef = useRef<number | null>(null);
@@ -53,6 +70,13 @@ export function SessionPage() {
     if (countdownIntervalRef.current !== null) {
       window.clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
+    }
+  }, []);
+
+  const clearSessionCountdown = useCallback(() => {
+    if (sessionCountdownIntervalRef.current !== null) {
+      window.clearInterval(sessionCountdownIntervalRef.current);
+      sessionCountdownIntervalRef.current = null;
     }
   }, []);
 
@@ -79,13 +103,40 @@ export function SessionPage() {
     }
   }, []);
 
-  // Format milliseconds into MM:SS
+  // Format initialization milliseconds into MM:SS
   const formatCountdown = (ms: number): string => {
     const totalSecs = Math.max(0, Math.ceil(ms / 1000));
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
+
+  // Format session expiration milliseconds into HH:MM:SS
+  const formatSessionCountdown = (ms: number): string => {
+    const totalSecs = Math.max(0, Math.floor(ms / 1000));
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Synchronize server clock offset and calculate remaining session time from expires_at
+  const updateSessionExpiration = useCallback((res: SessionStatusResponse | SessionResponse) => {
+    if (!res.expires_at) return;
+    const expiresMs = new Date(res.expires_at).getTime();
+    if (res.time_remaining_seconds !== undefined) {
+      const serverNowMs = expiresMs - res.time_remaining_seconds * 1000;
+      serverTimeOffsetRef.current = Date.now() - serverNowMs;
+    }
+    const currentServerNow = Date.now() - serverTimeOffsetRef.current;
+    const remaining = Math.max(0, expiresMs - currentServerNow);
+    setSessionRemainingMs(remaining);
+  }, []);
+
+  // Active environment flag: true whenever a session pod is running or provisioning
+  const isEnvironmentActive =
+    sessionStatus === 'ready' || sessionStatus === 'initializing' || sessionStatus === 'starting';
+
 
   // ════════════════════════════════════════════════════════════════════
   // 1. INITIAL PAGE LOAD — detect existing session on refresh
@@ -114,6 +165,7 @@ export function SessionPage() {
 
           if (isBackendReady || isInProgress) {
             setSessionData(statusRes);
+            updateSessionExpiration(statusRes);
 
             const deadlineMs = statusRes.initialization_deadline
               ? new Date(statusRes.initialization_deadline).getTime()
@@ -137,6 +189,8 @@ export function SessionPage() {
             }
             setIsCheckingInitial(false);
             return;
+          } else if (backendStatus === 'expired') {
+            setError('Your previous session has expired. You can start a new environment.');
           }
         }
 
@@ -164,11 +218,12 @@ export function SessionPage() {
     return () => {
       mounted = false;
       clearCountdown();
+      clearSessionCountdown();
       clearSessionPoll();
       clearVpnPoll();
       clearHealthPoll();
     };
-  }, [clearCountdown, clearSessionPoll, clearVpnPoll, clearHealthPoll]);
+  }, [clearCountdown, clearSessionCountdown, clearSessionPoll, clearVpnPoll, clearHealthPoll, updateSessionExpiration]);
 
   // ════════════════════════════════════════════════════════════════════
   // 2. COUNTDOWN TICK — absolute-deadline-based, ticks every second
@@ -347,18 +402,25 @@ export function SessionPage() {
         if (res.status === 'terminated' || res.status === 'expired' || res.status === 'error') {
           clearHealthPoll();
           clearVpnPoll();
+          clearSessionCountdown();
           setBackendReady(false);
           setSessionData(null);
           setVpnStatus('unknown');
           setVpnTunnelIp(null);
           setSessionStatus('idle');
-          setError('Environment was terminated. The session pod no longer exists.');
+          setError(
+            res.status === 'expired'
+              ? 'Your CTF session has expired. You can start a new environment.'
+              : 'Environment was terminated. The session pod no longer exists.'
+          );
         } else if (res.is_ready && (res.status === 'ready' || res.status === 'active')) {
-          // Session still alive — update metadata (IP may have changed)
+          // Session still alive — update metadata (IP may have changed, extension may have occurred)
           setSessionData(res);
+          updateSessionExpiration(res);
         } else if (!res.is_ready) {
           clearHealthPoll();
           clearVpnPoll();
+          clearSessionCountdown();
           setBackendReady(false);
           setSessionData(null);
           setVpnStatus('unknown');
@@ -378,7 +440,107 @@ export function SessionPage() {
       active = false;
       clearHealthPoll();
     };
-  }, [sessionStatus, clearHealthPoll, clearVpnPoll]);
+  }, [sessionStatus, clearHealthPoll, clearVpnPoll, clearSessionCountdown, updateSessionExpiration]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // 6. BEFOREUNLOAD WARNING — browser reload / close tab / close window
+  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!isEnvironmentActive) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isEnvironmentActive]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // 7. BROWSER NAVIGATION GUARD (popstate / back / forward button)
+  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!isEnvironmentActive) return;
+
+    window.history.pushState(null, '', window.location.href);
+
+    const handlePopState = () => {
+      window.history.pushState(null, '', window.location.href);
+      setPendingNavDestination('/dashboard');
+      setModalStopError(null);
+      setShowLeaveModal(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [isEnvironmentActive]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // 8. SESSION EXPIRATION COUNTDOWN TICKER — second-by-second countdown
+  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!isEnvironmentActive || !sessionData?.expires_at) {
+      clearSessionCountdown();
+      return;
+    }
+
+    const tickSession = async () => {
+      if (!sessionData?.expires_at) return;
+      const expiresMs = new Date(sessionData.expires_at).getTime();
+      const currentServerNow = Date.now() - serverTimeOffsetRef.current;
+      const remaining = Math.max(0, expiresMs - currentServerNow);
+      setSessionRemainingMs(remaining);
+
+      if (remaining <= 0) {
+        clearSessionCountdown();
+        try {
+          const res = await getSessionStatus();
+          if (res.status === 'expired' || res.status === 'terminated' || !res.is_ready) {
+            clearCountdown();
+            clearSessionPoll();
+            clearVpnPoll();
+            clearHealthPoll();
+            setSessionStatus('idle');
+            setSessionData(null);
+            setBackendReady(false);
+            setVpnStatus('unknown');
+            setVpnTunnelIp(null);
+            setError('Environment expired. You can start a new environment.');
+          } else {
+            setSessionData(res);
+            updateSessionExpiration(res);
+          }
+        } catch {
+          setSessionStatus('idle');
+          setSessionData(null);
+          setBackendReady(false);
+          setError('Environment expired. You can start a new environment.');
+        }
+      }
+    };
+
+    tickSession();
+    sessionCountdownIntervalRef.current = window.setInterval(tickSession, 1000);
+
+    return () => {
+      clearSessionCountdown();
+    };
+  }, [
+    isEnvironmentActive,
+    sessionData?.expires_at,
+    clearSessionCountdown,
+    clearCountdown,
+    clearSessionPoll,
+    clearVpnPoll,
+    clearHealthPoll,
+    updateSessionExpiration,
+  ]);
 
   // ════════════════════════════════════════════════════════════════════
   // HANDLER: Start Environment (explicit user click only)
@@ -396,6 +558,7 @@ export function SessionPage() {
     try {
       const res = await createSession();
       setSessionData(res);
+      updateSessionExpiration(res);
 
       if (res.status === 'ready') {
         setBackendReady(true);
@@ -408,9 +571,13 @@ export function SessionPage() {
       const remaining = Math.max(0, deadline - Date.now());
       setTimeRemainingMs(remaining > 0 ? remaining : TOTAL_COUNTDOWN_MS);
     } catch (err: unknown) {
-      const apiErr = err as { message?: string; detail?: string };
+      const apiErr = err as { message?: string; detail?: string; response?: { data?: { detail?: string; message?: string } } };
       const msg =
-        apiErr.detail || apiErr.message || 'Failed to start environment. Please try again.';
+        apiErr.response?.data?.detail ||
+        apiErr.response?.data?.message ||
+        apiErr.detail ||
+        apiErr.message ||
+        'Failed to start environment. Please try again.';
       setError(msg);
       setSessionStatus('failed');
     }
@@ -425,27 +592,118 @@ export function SessionPage() {
     const previousStatus = sessionStatus;
     setSessionStatus('stopping');
     clearCountdown();
+    clearSessionCountdown();
     clearSessionPoll();
     clearVpnPoll();
     clearHealthPoll();
     setInitializationDeadline(null);
 
     try {
-      await terminateSession();
+      await terminateSession(sessionData?.session_id);
       setSessionStatus('idle');
       setSessionData(null);
       setBackendReady(false);
       setVpnStatus('unknown');
       setVpnTunnelIp(null);
+      setSessionRemainingMs(0);
       setError(null);
 
       const slots = await getSlotInfo().catch(() => null);
       if (slots) setSlotInfo(slots);
     } catch (err: unknown) {
-      const apiErr = err as { message?: string };
-      setError(apiErr.message || 'Failed to stop environment.');
+      const apiErr = err as { message?: string; detail?: string; response?: { data?: { detail?: string; message?: string } } };
+      const msg =
+        apiErr.response?.data?.detail ||
+        apiErr.response?.data?.message ||
+        apiErr.detail ||
+        apiErr.message ||
+        'Failed to stop environment.';
+      setError(msg);
       // Do not falsely show stopped — restore previous state
       setSessionStatus(previousStatus);
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLER: Add 1 Hour Extension (authoritative backend extension)
+  // ════════════════════════════════════════════════════════════════════
+  const handleExtendSession = async () => {
+    if (isExtending || !isEnvironmentActive) return;
+
+    setIsExtending(true);
+    setError(null);
+
+    try {
+      const res = await extendSession(sessionData?.session_id);
+      setSessionData(res);
+      updateSessionExpiration(res);
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string; detail?: string; response?: { data?: { detail?: string; message?: string } } };
+      const msg =
+        apiErr.response?.data?.detail ||
+        apiErr.response?.data?.message ||
+        apiErr.detail ||
+        apiErr.message ||
+        'Failed to extend session.';
+      setError(msg);
+    } finally {
+      setIsExtending(false);
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════
+  // HANDLERS: Internal Navigation Leave Guard
+  // ════════════════════════════════════════════════════════════════════
+  const handleNavClick = (e: React.MouseEvent, destination: string) => {
+    if (isEnvironmentActive) {
+      e.preventDefault();
+      setPendingNavDestination(destination);
+      setModalStopError(null);
+      setShowLeaveModal(true);
+    } else {
+      navigate(destination);
+    }
+  };
+
+  const handleModalStay = () => {
+    setShowLeaveModal(false);
+    setPendingNavDestination(null);
+    setModalStopError(null);
+  };
+
+  const handleModalStopAndLeave = async () => {
+    setIsStoppingFromModal(true);
+    setModalStopError(null);
+
+    clearCountdown();
+    clearSessionCountdown();
+    clearSessionPoll();
+    clearVpnPoll();
+    clearHealthPoll();
+
+    try {
+      await terminateSession(sessionData?.session_id);
+      setSessionStatus('idle');
+      setSessionData(null);
+      setBackendReady(false);
+      setVpnStatus('unknown');
+      setVpnTunnelIp(null);
+      setSessionRemainingMs(0);
+      setShowLeaveModal(false);
+      const target = pendingNavDestination || '/dashboard';
+      setPendingNavDestination(null);
+      navigate(target);
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string; detail?: string; response?: { data?: { detail?: string; message?: string } } };
+      const msg =
+        apiErr.response?.data?.detail ||
+        apiErr.response?.data?.message ||
+        apiErr.detail ||
+        apiErr.message ||
+        'Failed to stop environment. Please try again.';
+      setModalStopError(msg);
+    } finally {
+      setIsStoppingFromModal(false);
     }
   };
 
@@ -539,6 +797,7 @@ export function SessionPage() {
           <MirrageLogo size="lg" />
           <Link
             to="/dashboard"
+            onClick={(e) => handleNavClick(e, '/dashboard')}
             className="text-xs font-mono text-[var(--text-faint)] hover:text-[var(--text)] transition-colors"
           >
             ← Return to Dashboard
@@ -684,6 +943,55 @@ export function SessionPage() {
         {/* ─── STATE 4: READY (VPN Instructions & Profile Download) ─── */}
         {!isCheckingInitial && sessionStatus === 'ready' && (
           <div className="space-y-6 animate-fade-in">
+            {/* Session Expiry & Time Remaining Card */}
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
+                  SESSION TIME REMAINING
+                </span>
+                <span
+                  className={`font-mono text-[11px] px-2 py-0.5 rounded ${
+                    sessionRemainingMs <= 10 * 60 * 1000
+                      ? 'text-[var(--danger)] bg-[var(--danger-subtle)]'
+                      : 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+                  }`}
+                >
+                  {sessionRemainingMs <= 10 * 60 * 1000 ? 'EXPIRING SOON' : 'ACTIVE'}
+                </span>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-2">
+                <span
+                  className={`font-mono text-3xl sm:text-4xl tracking-widest font-semibold ${
+                    sessionRemainingMs <= 10 * 60 * 1000
+                      ? 'text-[var(--danger)]'
+                      : 'text-[var(--text)]'
+                  }`}
+                >
+                  {formatSessionCountdown(sessionRemainingMs)}
+                </span>
+                <button
+                  onClick={handleExtendSession}
+                  disabled={isExtending}
+                  className="btn-outline text-xs font-mono uppercase tracking-wider py-2 px-3 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Extend session by 1 hour"
+                >
+                  {isExtending ? (
+                    <>
+                      <span className="w-3 h-3 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                      Extending...
+                    </>
+                  ) : (
+                    '+ Add 1 Hour'
+                  )}
+                </button>
+              </div>
+              {sessionData?.expires_at && (
+                <p className="text-[11px] text-[var(--text-faint)] mt-2 font-mono">
+                  Authoritative backend expiration: {new Date(sessionData.expires_at).toLocaleTimeString()}
+                </p>
+              )}
+            </div>
+
             {/* CTF Target Card */}
             <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5">
               <div className="flex items-center justify-between mb-2">
@@ -806,6 +1114,7 @@ export function SessionPage() {
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <Link
                 to="/challenges"
+                onClick={(e) => handleNavClick(e, '/challenges')}
                 className="btn-primary flex-1 text-center py-2.5 text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1"
               >
                 Go to Challenges <span>→</span>
@@ -904,6 +1213,15 @@ export function SessionPage() {
           "What you see<br />is not what was built."
         </p>
       </div>
+
+      {/* Leave Guard Modal for Internal Navigation */}
+      <EnvironmentLeaveGuardModal
+        isOpen={showLeaveModal}
+        onStay={handleModalStay}
+        onStopAndLeave={handleModalStopAndLeave}
+        isStopping={isStoppingFromModal}
+        stopError={modalStopError}
+      />
     </div>
   );
 }

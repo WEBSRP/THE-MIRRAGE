@@ -285,16 +285,15 @@ class SessionService:
 
         return session
 
-    def _extend_session_expiry(self, session: GameSession) -> None:
+    def _record_activity(self, session: GameSession) -> None:
         """
-        Extend session expiry on meaningful activity.
+        Record meaningful activity on the session.
 
-        This implements the TRUE inactivity timeout: each meaningful action
-        resets the 30-minute countdown from the current time.
+        Updates last_active_at but does NOT modify expires_at.
+        Session lifetime is fixed at creation (SESSION_TIMEOUT_MINUTES).
+        Explicit extension requires the extend_session endpoint.
         """
-        now = datetime.now(timezone.utc)
-        session.last_active_at = now
-        session.expires_at = now + timedelta(minutes=settings.SESSION_TIMEOUT_MINUTES)
+        session.last_active_at = datetime.now(timezone.utc)
 
     async def start_session(
         self,
@@ -393,7 +392,7 @@ class SessionService:
             new_session.status = SessionStatus.READY
             new_session.ready_at = datetime.now(timezone.utc)
 
-            self._extend_session_expiry(new_session)
+            self._record_activity(new_session)
 
             async with self._slot_lock:
                 activity = ActivityLog(
@@ -483,9 +482,9 @@ class SessionService:
                 if not session:
                     raise EntityNotFoundError("Active Session for User", user.username)
 
-        # Meaningful activity extends session lifetime
+        # Record meaningful activity (does not change expiration)
         if session.is_active and is_activity:
-            self._extend_session_expiry(session)
+            self._record_activity(session)
             await db.commit()
 
         # CRITICAL RULE: If session is NOT active, NEVER return target IP or is_ready=True
@@ -519,7 +518,7 @@ class SessionService:
         self, db: AsyncSession, session: GameSession
     ) -> None:
         if session.is_active:
-            self._extend_session_expiry(session)
+            self._record_activity(session)
             await db.commit()
 
     async def record_activity_for_user(
@@ -527,7 +526,7 @@ class SessionService:
     ) -> None:
         session = await self.get_active_session_for_user(db, user_id)
         if session and session.is_active:
-            self._extend_session_expiry(session)
+            self._record_activity(session)
             await db.commit()
 
     async def stop_session(
@@ -623,6 +622,112 @@ class SessionService:
             status=session.status,
             mirage_ip=None,
             message="Session terminated successfully",
+        )
+
+    async def extend_session(
+        self,
+        db: AsyncSession,
+        user: User,
+    ) -> SessionStatusResponse:
+        """
+        Extend the user's active session by exactly 1 hour.
+
+        Validates:
+        - Session is active and not expired
+        - Total session duration does not exceed SESSION_MAX_DURATION_MINUTES
+        - Session has not already been stopped/terminated
+
+        Returns the updated session status.
+        """
+        # Look for the user's latest session
+        query = (
+            select(GameSession)
+            .where(GameSession.user_id == user.id)
+            .order_by(GameSession.created_at.desc())
+        )
+        result = await db.execute(query)
+        latest_session = result.scalars().first()
+
+        if not latest_session:
+            raise MirrageException(
+                status_code=400,
+                detail="No active session found to extend",
+                code="NO_ACTIVE_SESSION",
+            )
+
+        now = datetime.now(timezone.utc)
+
+        # Check if already expired or inactive
+        if latest_session.status == SessionStatus.EXPIRED or _to_utc(latest_session.expires_at) <= now:
+            raise MirrageException(
+                status_code=400,
+                detail="Session has already expired and cannot be extended",
+                code="SESSION_EXPIRED",
+            )
+
+        if not latest_session.is_active:
+            raise MirrageException(
+                status_code=400,
+                detail="Session is no longer active",
+                code="SESSION_NOT_ACTIVE",
+            )
+
+        # Reconcile if needed
+        session = await self._reconcile_single_session(db, latest_session)
+        if session.status == SessionStatus.EXPIRED or _to_utc(session.expires_at) <= now:
+            raise MirrageException(
+                status_code=400,
+                detail="Session has already expired and cannot be extended",
+                code="SESSION_EXPIRED",
+            )
+
+        if not session.is_active:
+            raise MirrageException(
+                status_code=400,
+                detail="Session is no longer active",
+                code="SESSION_NOT_ACTIVE",
+            )
+
+        # Check max duration limit
+        new_expires_at = _to_utc(session.expires_at) + timedelta(hours=1)
+        total_duration = new_expires_at - _to_utc(session.created_at)
+        max_duration = timedelta(minutes=settings.SESSION_MAX_DURATION_MINUTES)
+
+        if total_duration > max_duration:
+            raise MirrageException(
+                status_code=400,
+                detail=f"Cannot extend: maximum session duration of {settings.SESSION_MAX_DURATION_MINUTES} minutes would be exceeded",
+                code="MAX_DURATION_EXCEEDED",
+            )
+
+        # Extend the session
+        session.expires_at = new_expires_at
+        session.last_active_at = now
+        await db.commit()
+        await db.refresh(session)
+
+        logger.info(
+            f"Session {session.id} extended by 1 hour. "
+            f"New expiration: {session.expires_at}"
+        )
+
+        # Return updated status
+        init_deadline = session.created_at + timedelta(minutes=3)
+        is_ready = session.status == SessionStatus.READY
+
+        return SessionStatusResponse(
+            session_id=session.id,
+            status=session.status,
+            mirage_ip=session.mirage_ip if is_ready else None,
+            mirage_port=session.mirage_port,
+            player_vpn_ip=session.player_vpn_ip,
+            created_at=session.created_at,
+            ready_at=session.ready_at,
+            expires_at=session.expires_at,
+            initialization_deadline=init_deadline,
+            last_active_at=session.last_active_at,
+            time_remaining_seconds=_time_remaining(session.expires_at),
+            is_ready=is_ready,
         )
 
     async def cleanup_expired_sessions(self, db: AsyncSession) -> int:
