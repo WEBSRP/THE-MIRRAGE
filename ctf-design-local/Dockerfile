@@ -13,15 +13,14 @@ RUN apt-get update && \
         nano \
         netcat-openbsd \
         ca-certificates \
-        python3  \
+        python3 \
         cron && \
     rm -rf /var/lib/apt/lists/*
 
-#ctf user
-RUN useradd -m -s /bin/bash player 
+# CTF user
+RUN useradd -m -s /bin/bash player
 
-
-#SSH configuration
+# SSH configuration
 RUN mkdir -p /run/sshd && \
     echo 'player:player123' | chpasswd && \
     sed -i \
@@ -30,24 +29,38 @@ RUN mkdir -p /run/sshd && \
         /etc/ssh/sshd_config
 
 # CTF directories
-RUN mkdir -p /opt/ctf/backend /var/www/html /home/player
+RUN mkdir -p \
+        /opt/ctf/backend \
+        /var/www/html \
+        /home/player \
+        /opt/mirrage
 
+# Nginx configuration
 COPY nginx/default /etc/nginx/sites-available/default
-RUN ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 
+RUN ln -sf \
+    /etc/nginx/sites-available/default \
+    /etc/nginx/sites-enabled/default
+
+# Web interface
 COPY web/ /var/www/html/
+
+# Backend
 COPY backend/ /opt/ctf/backend/
 
-RUN chown -R www-data:www-data /var/www/html /opt/ctf/backend && \
+RUN chown -R www-data:www-data \
+        /var/www/html \
+        /opt/ctf/backend && \
     chmod +x /opt/ctf/backend/server.py && \
     chown -R player:player /home/player
 
-#HTTP
+# HTTP
 EXPOSE 80
 
-#SSH
+# SSH
 EXPOSE 22
 
+# CTF flags
 RUN echo "MIRRAGE{web_test_flag}" > /var/www/html/flag.txt && \
     echo "MIRRAGE{user_test_flag}" > /home/player/flag.txt && \
     echo "MIRRAGE{root_test_flag}" > /root/flag.txt && \
@@ -58,20 +71,18 @@ RUN echo "MIRRAGE{web_test_flag}" > /var/www/html/flag.txt && \
     chmod 600 /home/player/flag.txt && \
     chmod 600 /root/flag.txt
 
-#player and www-data maintenance group
+# Player and www-data maintenance group
 RUN groupadd maintenance && \
     usermod -aG maintenance player && \
     usermod -aG maintenance www-data
 
-# The intended exploitable script
-RUN mkdir -p /opt/mirrage
-
+# Intended exploitable script
 COPY challenge/maintenance.sh /opt/mirrage/maintenance.sh
 
 RUN chown player:maintenance /opt/mirrage/maintenance.sh && \
     chmod 775 /opt/mirrage/maintenance.sh
 
-# Cron job creation
+# Cron job
 RUN cat > /etc/cron.d/mirrage-maintenance <<'EOF'
 */1 * * * * player /opt/mirrage/maintenance.sh >> /var/log/mirrage-maintenance.log 2>&1
 EOF
@@ -79,6 +90,5 @@ EOF
 RUN touch /var/log/mirrage-maintenance.log && \
     chown player:player /var/log/mirrage-maintenance.log
 
-
-
+# Start all CTF services
 CMD ["/bin/bash", "-c", "cron; /usr/sbin/sshd; sudo -u www-data python3 -u /opt/ctf/backend/server.py & nginx; exec tail -f /dev/null"]
