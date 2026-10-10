@@ -90,5 +90,27 @@ EOF
 RUN touch /var/log/mirrage-maintenance.log && \
     chown player:player /var/log/mirrage-maintenance.log
 
+
+#root privesec challenge using cron
+COPY challenge/root-maintenance.sh /usr/local/sbin/mirrage-backup
+
+RUN chown root:root /usr/local/sbin/mirrage-backup && \
+    chmod 755 /usr/local/sbin/mirrage-backup && \
+    printf '%s\n' 'BACKUP_DIR=/var/backups/mirrage' \
+      > /opt/mirrage/backup.conf && \
+    chown player:player /opt/mirrage/backup.conf && \
+    chmod 644 /opt/mirrage/backup.conf && \
+    mkdir -p /var/backups/mirrage && \
+    touch /var/log/mirrage-root-backup.log && \
+    chown root:root /var/log/mirrage-root-backup.log && \
+    chmod 644 /var/log/mirrage-root-backup.log
+
+RUN cat > /etc/cron.d/mirrage-root-backup <<'EOF'
+* * * * * root /usr/local/sbin/mirrage-backup >> /var/log/mirrage-root-backup.log 2>&1
+EOF
+
+RUN chown root:root /etc/cron.d/mirrage-root-backup && \
+    chmod 644 /etc/cron.d/mirrage-root-backup
+
 # Start all CTF services
-CMD ["/bin/bash", "-c", "cron; /usr/sbin/sshd; sudo -u www-data python3 -u /opt/ctf/backend/server.py & nginx; exec tail -f /dev/null"]
+CMD ["/bin/bash", "-c", "cron; /usr/sbin/sshd; sudo -u www-data python3 -u /opt/ctf/backend/server.py & nginx; exec tail -f /dev/null"]4
