@@ -1,132 +1,114 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext';
-import { MainLayout } from './layouts/MainLayout';
-import { DashboardLayout } from './layouts/DashboardLayout';
-import { HomePage } from './pages/HomePage';
-import { LoginPage } from './pages/LoginPage';
-import { RegisterPage } from './pages/RegisterPage';
-import { SessionPage } from './pages/SessionPage';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { ToastViewport } from './components/ui';
+import { AuthLayout, PlatformLayout } from './layouts/PlatformLayout';
+import { LandingPage } from './pages/LandingPage';
+import { ChallengeDetailPage, ChallengesPage } from './pages/ChallengesPages';
+import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, VerifyOtpPage } from './pages/AuthPages';
 import { DashboardPage } from './pages/DashboardPage';
-import { ChallengesPage } from './pages/ChallengesPage';
-import { ChallengeDetailPage } from './pages/ChallengeDetailPage';
+import { VpnPage } from './pages/VpnPage';
+import { SessionsPage } from './pages/SessionsPage';
+import { ProfilePage, SettingsPage } from './pages/AccountPages';
 import { LeaderboardPage } from './pages/LeaderboardPage';
 import { DocsPage } from './pages/DocsPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { VpnPage } from './pages/VpnPage';
+import { useApp } from './state/AppState';
 
-/**
- * ProtectedRoute — Redirects to /login if not authenticated.
- */
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+function ProtectedRoute() {
+  const { isAuthenticated, isAuthLoading } = useApp();
+  const location = useLocation();
 
-  if (isLoading) {
+  if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
-        <p className="text-[var(--text-faint)] text-sm animate-pulse-subtle">Loading...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
+        <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Verifying operator credentials...</p>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
+  return isAuthenticated ? <PlatformLayout /> : <Navigate replace state={{ from: location.pathname }} to="/login" />;
 }
 
-function App() {
+function PublicAuthRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isAuthLoading } = useApp();
+
+  if (isAuthLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
+        <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Loading...</p>
+      </div>
+    );
+  }
+
+  return isAuthenticated ? <Navigate replace to="/dashboard" /> : <>{children}</>;
+}
+
+function PassagePage() {
   return (
-    <Routes>
-      {/* ─── Public routes (MainLayout with top navbar) ─── */}
-      <Route path="/" element={<MainLayout><HomePage /></MainLayout>} />
-      <Route path="/explore" element={<MainLayout><HomePage /></MainLayout>} />
-
-      {/* ─── Auth routes (own layout) ─── */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/otp-login" element={<Navigate to="/login" replace />} />
-      <Route path="/register" element={<RegisterPage />} />
-
-      {/* ─── Session init (own layout) ─── */}
-      <Route path="/session" element={
-        <ProtectedRoute><SessionPage /></ProtectedRoute>
-      } />
-
-      {/* ─── Dashboard routes (sidebar layout) ─── */}
-      <Route path="/dashboard" element={
-        <ProtectedRoute>
-          <DashboardLayout><DashboardPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/challenges" element={
-        <ProtectedRoute>
-          <DashboardLayout><ChallengesPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/challenges/:slug" element={
-        <ProtectedRoute>
-          <DashboardLayout><ChallengeDetailPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/leaderboard" element={
-        <ProtectedRoute>
-          <DashboardLayout><LeaderboardPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/docs" element={
-        <ProtectedRoute>
-          <DashboardLayout><DocsPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/profile" element={
-        <ProtectedRoute>
-          <DashboardLayout><ProfilePage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-      <Route path="/vpn" element={
-        <ProtectedRoute>
-          <DashboardLayout><VpnPage /></DashboardLayout>
-        </ProtectedRoute>
-      } />
-
-      {/* ─── Hidden route — easter egg ─── */}
-      <Route
-        path="/passage"
-        element={
-          <main className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-6">
-            <div className="text-center animate-fade-in" style={{ animationDuration: '3s' }}>
-              <p className="text-[var(--accent)] text-sm tracking-wider uppercase mb-4 font-medium">
-                YOU FOUND THE PASSAGE
-              </p>
-              <p className="text-[var(--text-muted)] text-base max-w-md mx-auto leading-relaxed">
-                "The monument is only the surface. When the reflection disappears, look where the water used to be."
-              </p>
-              <p className="text-[var(--text-faint)]/40 text-xs tracking-wider mt-8 font-mono">
-                TARGET GATEWAY: 10.42.0.0/24 — ACTIVE THRESHOLD
-              </p>
-            </div>
-          </main>
-        }
-      />
-
-      {/* ─── 404 ─── */}
-      <Route
-        path="*"
-        element={
-          <main className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-6">
-            <div className="text-center">
-              <h1 className="font-serif text-6xl text-[var(--text-faint)]/40 mb-4">
-                404
-              </h1>
-              <p className="text-base text-[var(--text-muted)] tracking-wide">
-                Nothing here but silence.
-              </p>
-            </div>
-          </main>
-        }
-      />
-    </Routes>
+    <main className="not-found-page" style={{ textAlign: 'center', maxWidth: '640px', margin: '0 auto', minHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '2rem' }}>
+      <span className="platform-eyebrow" style={{ color: 'var(--lime)' }}>YOU FOUND THE PASSAGE</span>
+      <h1 style={{ margin: '1rem 0' }}>The monument is only the surface.<br /><em>Look where the water used to be.</em></h1>
+      <p style={{ color: 'var(--muted)', fontSize: '0.95rem', lineHeight: 1.7 }}>
+        "When the reflection disappears, examine the residual cache."
+      </p>
+      <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--lime)', marginTop: '2rem', padding: '0.5rem 1rem', background: 'var(--panel-deep)', borderRadius: 'var(--radius)', border: '1px solid var(--line)', display: 'inline-block' }}>
+        TARGET GATEWAY: 10.42.0.0/24 — ACTIVE THRESHOLD
+      </code>
+      <div style={{ marginTop: '2rem' }}>
+        <a className="ui-button ui-button-secondary ui-button-medium" href="/challenges">
+          Return to investigation
+        </a>
+      </div>
+    </main>
   );
 }
 
-export default App;
+function NotFoundPage() {
+  return (
+    <div className="not-found-page">
+      <span className="platform-eyebrow">Signal not found / 404</span>
+      <h1>Nothing here<br /><em>but silence.</em></h1>
+      <p>The route you requested is outside the current observation layer.</p>
+      <a className="ui-button ui-button-primary ui-button-medium" href="/">
+        Return to the surface
+      </a>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public routes */}
+        <Route element={<LandingPage />} path="/" />
+        <Route element={<LandingPage />} path="/explore" />
+
+        {/* Auth routes */}
+        <Route element={<AuthLayout><PublicAuthRoute><LoginPage /></PublicAuthRoute></AuthLayout>} path="/login" />
+        <Route element={<Navigate replace to="/login" />} path="/otp-login" />
+        <Route element={<AuthLayout><PublicAuthRoute><RegisterPage /></PublicAuthRoute></AuthLayout>} path="/register" />
+        <Route element={<AuthLayout><PublicAuthRoute><VerifyOtpPage /></PublicAuthRoute></AuthLayout>} path="/verify-otp" />
+        <Route element={<AuthLayout><PublicAuthRoute><ForgotPasswordPage /></PublicAuthRoute></AuthLayout>} path="/forgot-password" />
+        <Route element={<AuthLayout><PublicAuthRoute><ResetPasswordPage /></PublicAuthRoute></AuthLayout>} path="/reset-password" />
+
+        {/* Protected Dashboard and Workspace routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<DashboardPage />} path="/dashboard" />
+          <Route element={<VpnPage />} path="/vpn" />
+          <Route element={<ChallengesPage />} path="/challenges" />
+          <Route element={<ChallengeDetailPage />} path="/challenges/:id" />
+          <Route element={<SessionsPage />} path="/sessions" />
+          <Route element={<Navigate replace to="/sessions" />} path="/session" />
+          <Route element={<LeaderboardPage />} path="/leaderboard" />
+          <Route element={<DocsPage />} path="/docs" />
+          <Route element={<ProfilePage />} path="/profile" />
+          <Route element={<SettingsPage />} path="/settings" />
+        </Route>
+
+        {/* Easter Egg & 404 */}
+        <Route element={<PassagePage />} path="/passage" />
+        <Route element={<NotFoundPage />} path="*" />
+      </Routes>
+      <ToastViewport />
+    </BrowserRouter>
+  );
+}

@@ -1,12 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-interface ApiError {
+export interface ApiError {
   error: boolean;
   code: string;
   message: string;
 }
 
-class ApiClient {
+export class ApiClient {
   private baseUrl: string;
 
   constructor(baseUrl: string) {
@@ -14,7 +14,7 @@ class ApiClient {
   }
 
   private getHeaders(): HeadersInit {
-    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = localStorage.getItem('mirrage-token');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
