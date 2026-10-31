@@ -1,337 +1,258 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { useTheme } from '../contexts/ThemeContext';
-import { getVpnStatus, downloadVpnConfig, downloadSignalConfig, type VpnStatus } from '../services/vpnService';
-import { getSessionStatus, type SessionStatusResponse } from '../services/sessionService';
-import { getActivity, type ActivityLog } from '../services/activityService';
-
-/** Maximum number of meaningful activity items to show on the dashboard. */
-const ACTIVITY_DISPLAY_LIMIT = 5;
-
-/**
- * Map raw backend event types to clean, human-readable labels.
- * Internal/technical events that shouldn't be shown on the dashboard
- * are mapped to `null`.
- */
-const EVENT_LABEL_MAP: Record<string, string | null> = {
-  session_start: 'Environment started',
-  session_stop: 'Environment stopped',
-  vpn_connect: 'VPN connected',
-  vpn_disconnect: 'VPN disconnected',
-  flag_submission: 'Flag submitted',
-  ssh_auth_attempt: null,   // Internal — hide from dashboard
-  ssh_command: null,         // Internal — hide from dashboard
-  honeypot_trigger: null,    // Internal — hide from dashboard
-  deception_discovery: null, // Internal — hide from dashboard
-};
-
-/** Returns a human-readable label for an activity event, or `null` to hide it. */
-function getEventLabel(activity: ActivityLog): string | null {
-  const mapped = EVENT_LABEL_MAP[activity.event_type];
-  if (mapped !== undefined) return mapped;
-  // Unknown event types — hide rather than expose raw names
-  return null;
-}
-
-/**
- * Format a timestamp into a concise, human-readable relative string.
- *
- * Examples: "Just now", "2 min ago", "Today · 11:36", "Yesterday · 18:42"
- */
-function formatRelativeTime(timestamp: string): string {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-
-  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-
-  if (diffMin < 1) return 'Just now';
-  if (diffMin < 60) return `${diffMin} min ago`;
-
-  // Check if same calendar day
-  const isToday =
-    date.getDate() === now.getDate() &&
-    date.getMonth() === now.getMonth() &&
-    date.getFullYear() === now.getFullYear();
-
-  if (isToday) return `Today · ${timeStr}`;
-
-  // Check yesterday
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday =
-    date.getDate() === yesterday.getDate() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getFullYear() === yesterday.getFullYear();
-
-  if (isYesterday) return `Yesterday · ${timeStr}`;
-
-  // Older — show short date
-  if (diffHours < 168) {
-    // Within a week — show weekday
-    const weekday = date.toLocaleDateString([], { weekday: 'short' });
-    return `${weekday} · ${timeStr}`;
-  }
-
-  // Older than a week — show date
-  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return `${dateStr} · ${timeStr}`;
-}
-
-/**
- * Process raw activity logs into clean, deduplicated dashboard items.
- *
- * - Filters out internal/technical events
- * - Collapses consecutive events of the same type
- * - Limits to ACTIVITY_DISPLAY_LIMIT items
- */
-function processActivities(raw: ActivityLog[]): { label: string; timestamp: string; id: string }[] {
-  const items: { label: string; timestamp: string; id: string }[] = [];
-
-  for (const activity of raw) {
-    const label = getEventLabel(activity);
-    if (label === null) continue;
-
-    // Deduplicate: skip if the previous visible item has the same label
-    if (items.length > 0 && items[items.length - 1].label === label) continue;
-
-    items.push({
-      label,
-      timestamp: activity.timestamp,
-      id: activity.id,
-    });
-
-    if (items.length >= ACTIVITY_DISPLAY_LIMIT) break;
-  }
-
-  return items;
-}
+import { Link } from 'react-router-dom';
+import { Icon } from '../components/Icon';
+import { EmptyState, ProgressBar } from '../components/ui';
+import { InteractiveNetworkScene } from '../design-system/InteractiveVisuals';
+import { useApp } from '../state/AppState';
+import './dashboard-space.css';
 
 export function DashboardPage() {
-  const { user } = useAuth();
-  const { theme } = useTheme();
-  const navigate = useNavigate();
+  const { user, challenges, solvedChallengeIds, activities, vpnTelemetry, activeSessionData } = useApp();
+  const isSessionOnline = Boolean(activeSessionData && (activeSessionData.status === 'ready' || activeSessionData.status === 'active'));
+  const isSessionInitializing = activeSessionData?.status === 'initializing' || activeSessionData?.status === 'provisioning';
 
-  const [vpnStatus, setVpnStatus] = useState<VpnStatus | null>(null);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatusResponse | null>(null);
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function fetchData() {
-      try {
-        const [vpnRes, sessionRes, activityRes] = await Promise.all([
-          getVpnStatus().catch(() => null),
-          getSessionStatus().catch(() => null),
-          getActivity().catch(() => [])
-        ]);
-
-        if (mounted) {
-          setVpnStatus(vpnRes);
-          setSessionStatus(sessionRes);
-          setActivities(activityRes || []);
-          setIsLoading(false);
-        }
-      } catch {
-        if (mounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    fetchData();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const handleDownloadVpn = async () => {
-    try {
-      await downloadVpnConfig();
-    } catch (error) {
-      console.error('Failed to download VPN config', error);
-    }
-  };
-
-  const handleDownloadSignal = async () => {
-    try {
-      await downloadSignalConfig();
-    } catch (error) {
-      console.error('Failed to download Signal config', error);
-    }
-  };
-
-  const greeting = theme === 'morning' ? 'Good morning' : 'Good evening';
-
-  // Environment ID generation or placeholder
-  const envId = sessionStatus?.session_id
-    ? `MIRAGE-${sessionStatus.session_id.substring(0, 4).toUpperCase()}`
-    : 'MIRAGE-7F31';
-
-  const isSessionOnline = !!sessionStatus?.is_ready && (sessionStatus?.status === 'active' || sessionStatus?.status === 'running' || sessionStatus?.status === 'ready');
-  const isSessionInitializing = sessionStatus?.status === 'initializing' || sessionStatus?.status === 'provisioning' || sessionStatus?.status === 'pending';
-  const envIp = isSessionOnline && sessionStatus?.mirage_ip ? sessionStatus.mirage_ip : null;
-
-  const displayActivities = processActivities(activities);
+  const solved = challenges.filter((challenge) =>
+    solvedChallengeIds.includes(challenge.slug) || solvedChallengeIds.includes(challenge.id) || challenge.is_solved
+  );
+  const available = challenges.filter((challenge) =>
+    !solvedChallengeIds.includes(challenge.slug) && !solvedChallengeIds.includes(challenge.id) && !challenge.is_solved
+  );
+  const activeCount = isSessionOnline || isSessionInitializing ? 1 : 0;
+  const nextTarget = available[0] || challenges[0];
+  const completion = challenges.length ? (solved.length / challenges.length) * 100 : 0;
+  const isVpnConnected = Boolean(vpnTelemetry?.is_connected);
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl text-[var(--text)]">
-          {greeting}, {user?.username || 'Explorer'}.
-        </h1>
-        <p className="text-[var(--text-muted)] text-sm">
-          Ready to uncover what lies beneath?
-        </p>
+    <div className="platform-page dashboard-space">
+      <header className="platform-page-header dashboard-space-welcome">
+        <div>
+          <span className="platform-eyebrow">Welcome back, {user.username}</span>
+          <h1>Stay curious.<br /><em>Look closer.</em></h1>
+          <p>Dual-container Kubernetes targets with deception honeypots. Follow the signal.</p>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Environment Status Card */}
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5 flex flex-col gap-4 lg:col-span-2">
-          <div className="flex justify-between items-start">
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
-                YOUR ENVIRONMENT
-              </span>
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-lg text-[var(--text)]">{envId}</span>
-                {isSessionOnline ? (
-                  <span className="text-[var(--success)] text-xs flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] inline-block"></span>
-                    Online
-                  </span>
-                ) : isSessionInitializing ? (
-                  <span className="text-[var(--accent)] text-xs flex items-center gap-1 font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse inline-block"></span>
-                    Initializing...
-                  </span>
-                ) : (
-                  <span className="text-[var(--text-muted)] text-xs flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] inline-block"></span>
-                    Offline
-                  </span>
-                )}
-              </div>
-              {isSessionOnline && envIp && (
-                <span className="font-mono text-sm text-[var(--text-muted)]">
-                  {envIp}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col items-end gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-[var(--text-muted)]">VPN:</span>
-                <span className={vpnStatus?.is_connected ? 'text-[var(--success)]' : 'text-[var(--text)]'}>
-                  {vpnStatus?.is_connected ? 'Connected' : 'Not Connected'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[var(--text-muted)]">Signal:</span>
-                <span className="text-[var(--text)]">Available</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 mt-2">
-            {!isSessionOnline && !isSessionInitializing && (
-              <button
-                onClick={() => navigate('/session')}
-                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
-              >
-                Start Environment
-              </button>
-            )}
-            {isSessionInitializing && (
-              <button
-                onClick={() => navigate('/session')}
-                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer font-mono"
-              >
-                View Console (Initializing)
-              </button>
-            )}
-            {isSessionOnline && (
-              <button
-                onClick={() => navigate('/session')}
-                className="px-3 py-1.5 bg-[var(--accent)] text-[#000000] rounded text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
-              >
-                Environment Console
-              </button>
-            )}
-            {isSessionOnline && (
-              <button
-                onClick={handleDownloadVpn}
-                className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors cursor-pointer"
-              >
-                Download VPN Profile
-              </button>
-            )}
-            <button
-              onClick={handleDownloadSignal}
-              className="px-3 py-1.5 border border-[var(--border)] text-[var(--text)] rounded text-xs font-medium hover:bg-[var(--surface)] transition-colors cursor-pointer"
-            >
-              Download Signal
-            </button>
-          </div>
+      <dl aria-label="Range overview" className="dashboard-space-metrics">
+        <div className="dashboard-space-metric">
+          <dt>Challenges solved</dt>
+          <dd>
+            <strong>{solved.length.toString().padStart(2, '0')}</strong>
+            <span>of {challenges.length} active targets</span>
+          </dd>
         </div>
+        <div className="dashboard-space-metric">
+          <dt>Range points</dt>
+          <dd>
+            <strong>{user.points.toLocaleString()}</strong>
+            <span>Rank #{user.rank || 1} standing</span>
+          </dd>
+        </div>
+        <div className="dashboard-space-metric">
+          <dt>Active sessions</dt>
+          <dd>
+            <strong>{activeCount.toString().padStart(2, '0')}</strong>
+            <span>{isSessionOnline ? 'Pod online' : isSessionInitializing ? 'Pod provisioning' : 'Standby'}</span>
+          </dd>
+        </div>
+        <div className="dashboard-space-metric dashboard-space-vpn">
+          <dt>
+            <Link className="dashboard-space-link" to="/vpn">
+              VPN workspace <Icon name="arrow-up-right" size={13} />
+            </Link>
+          </dt>
+          <dd>
+            <strong className={isVpnConnected ? 'dashboard-space-connected' : undefined}>
+              {isVpnConnected ? 'Connected' : 'Standby'}
+            </strong>
+            <span>{isVpnConnected && vpnTelemetry?.assigned_ip ? vpnTelemetry.assigned_ip : 'OpenVPN tunnel'}</span>
+          </dd>
+        </div>
+      </dl>
 
-        {/* Explore Challenges Card */}
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-5 flex flex-col justify-between gap-4">
-          <div className="flex flex-col gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
-              TRAINING
-            </span>
-            <p className="text-sm text-[var(--text)]">
-              Step into realistic scenarios and test your skills.
-            </p>
-          </div>
-          <Link
-            to="/challenges"
-            className="text-[var(--accent)] text-sm hover:underline flex items-center gap-1 w-fit"
+      <div className="dashboard-space-direction">
+        <section aria-labelledby="dashboard-progress-title" className="dashboard-space-progress">
+          <span className="platform-card-kicker">Operator progress</span>
+          <h2 id="dashboard-progress-title">Breakthrough status.</h2>
+          <div
+            aria-label="Range completion"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={Math.round(completion)}
+            aria-valuetext={`${solved.length} of ${challenges.length} challenges solved`}
+            role="progressbar"
           >
-            View Challenges →
-          </Link>
-        </div>
-      </div>
+            <ProgressBar label="Range completion" value={completion} />
+          </div>
+          <p>{available.length} {available.length === 1 ? 'target' : 'targets'} remaining in active catalog</p>
+        </section>
 
-      {/* Recent Activity Section */}
-      <section className="flex flex-col gap-4">
-        <h2 className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
-          RECENT ACTIVITY
-        </h2>
-
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded p-1">
-          {isLoading ? (
-            <div className="p-4 text-sm text-[var(--text-muted)] text-center">Loading activity...</div>
-          ) : displayActivities.length > 0 ? (
-            <ul className="flex flex-col">
-              {displayActivities.map((item, idx) => (
-                <li
-                  key={item.id}
-                  className={`flex items-center gap-3 px-3 py-2.5 ${idx !== displayActivities.length - 1 ? 'border-b border-[var(--border)]' : ''}`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0"></span>
-                  <span className="text-sm text-[var(--text)] flex-1">{item.label}</span>
-                  <span className="font-mono text-[11px] text-[var(--text-faint)] whitespace-nowrap">
-                    {formatRelativeTime(item.timestamp)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+        <section aria-labelledby="dashboard-next-title" className="dashboard-space-next">
+          <span className="platform-card-kicker" id="dashboard-next-title">Suggested next target</span>
+          {nextTarget ? (
+            <>
+              <h2>{nextTarget.title}</h2>
+              <ul aria-label="Target details" className="dashboard-space-target-meta">
+                <li>{nextTarget.difficulty}</li>
+                <li>{nextTarget.category}</li>
+                <li>{nextTarget.estimatedTime}</li>
+                <li>{nextTarget.points} pts</li>
+              </ul>
+              <p className="dashboard-space-description">{nextTarget.description}</p>
+              <Link
+                aria-label={`Investigate ${nextTarget.title}`}
+                className="ui-button ui-button-primary ui-button-medium dashboard-space-action"
+                to={`/challenges/${nextTarget.slug || nextTarget.id}`}
+              >
+                Investigate target <Icon name="arrow-right" size={15} />
+              </Link>
+            </>
           ) : (
-            <div className="p-8 text-sm text-[var(--text-muted)] text-center flex flex-col items-center gap-2">
-              <span className="font-mono text-xs opacity-50">NO ACTIVITY</span>
-              <p>Your recent actions will appear here.</p>
+            <div className="dashboard-space-empty">
+              <EmptyState
+                action={
+                  <Link className="ui-button ui-button-secondary ui-button-medium" to="/challenges">
+                    View catalog <Icon name="arrow-right" size={15} />
+                  </Link>
+                }
+                icon={challenges.length ? 'check' : 'search'}
+                message={
+                  challenges.length
+                    ? 'You have solved the current targets. Revisit a challenge whenever you like.'
+                    : 'The target catalog is loading.'
+                }
+                title={challenges.length ? 'All targets cleared' : 'Loading targets...'}
+              />
             </div>
           )}
-        </div>
+        </section>
+      </div>
+
+      <section aria-label="Interactive network visualization" className="dashboard-space-network">
+        <InteractiveNetworkScene />
       </section>
+
+      <div className="dashboard-space-logbook">
+        <section aria-labelledby="dashboard-session-title" className="dashboard-space-session">
+          <div className="dashboard-space-section-heading">
+            <h2 id="dashboard-session-title">Environment pod</h2>
+            <Link className="dashboard-space-link" to="/sessions">
+              {isSessionOnline ? 'Console / terminal' : 'Session controls'}
+              <Icon name="arrow-up-right" size={14} />
+            </Link>
+          </div>
+          {activeSessionData && (isSessionOnline || isSessionInitializing) ? (
+            <ActiveSessionSummary
+              ip={activeSessionData.mirage_ip || '10.42.0.x'}
+              isReady={isSessionOnline}
+              sessionId={activeSessionData.session_id || 'active'}
+              status={activeSessionData.status}
+              title={challenges[0]?.title || 'Dual-Container Machine'}
+            />
+          ) : (
+            <div className="dashboard-space-empty">
+              <EmptyState
+                action={
+                  <Link className="ui-button ui-button-primary ui-button-medium" to="/sessions">
+                    Start environment <Icon name="arrow-right" size={14} />
+                  </Link>
+                }
+                icon="server"
+                message="Launch a dedicated pod to spin up the honeypot and CTF endpoints."
+                title="No active pod"
+              />
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="dashboard-activity-title" className="dashboard-space-activity">
+          <div className="dashboard-space-section-heading">
+            <h2 id="dashboard-activity-title">Audit & Telemetry Stream</h2>
+            <span className="dashboard-space-note">Cluster Verified</span>
+          </div>
+          <ActivityList activities={activities.slice(0, 5)} />
+        </section>
+      </div>
     </div>
+  );
+}
+
+function ActiveSessionSummary({
+  title,
+  ip,
+  status,
+  isReady,
+  sessionId,
+}: {
+  title: string;
+  ip: string;
+  status: string;
+  isReady: boolean;
+  sessionId: string;
+}) {
+  return (
+    <div className="dashboard-space-session-summary">
+      <div className="dashboard-space-session-meta">
+        <span className="dashboard-space-session-status">
+          {isReady ? 'Online' : status === 'initializing' ? 'Provisioning' : status}
+        </span>
+        <span>Pod / {sessionId.slice(0, 8)}</span>
+      </div>
+      <h3>{title}</h3>
+      <p className="dashboard-space-session-address">
+        <span>Target host:</span>
+        <strong style={{ color: 'var(--lime)', fontFamily: 'var(--font-mono)' }}>{ip}</strong>
+      </p>
+      {status === 'initializing' ? (
+        <div
+          aria-label="Provisioning cluster pod"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={65}
+          role="progressbar"
+        >
+          <ProgressBar label="Provisioning pod" tone="blue" value={65} />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem' }}>
+          <Link className="ui-button ui-button-secondary ui-button-small" to="/sessions">
+            Open console <Icon name="terminal" size={13} />
+          </Link>
+          <Link className="ui-button ui-button-ghost ui-button-small" to="/vpn">
+            VPN profile <Icon name="download" size={13} />
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityList({ activities }: { activities: ReturnType<typeof useApp>['activities'] }) {
+  if (!activities.length) {
+    return (
+      <div className="dashboard-space-empty">
+        <EmptyState
+          icon="activity"
+          message="Authentication events, environment launches, and flag breakthroughs will record here."
+          title="No activity recorded"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <ul className="dashboard-space-activity-list">
+      {activities.map((activity) => (
+        <li key={activity.id}>
+          <span
+            aria-hidden="true"
+            className={`dashboard-space-activity-dot dashboard-space-activity-dot-${activity.tone}`}
+          />
+          <div>
+            <strong>{activity.title}</strong>
+            <p>{activity.detail}</p>
+          </div>
+          <time>{activity.timestamp}</time>
+        </li>
+      ))}
+    </ul>
   );
 }

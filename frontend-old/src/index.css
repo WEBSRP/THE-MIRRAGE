@@ -1,0 +1,300 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════
+   MIRRAGE — Design System
+   Typography: Instrument Serif (display) + Inter (UI) + IBM Plex Mono (technical)
+   Themes: Night (default, cooler charcoal) + Morning (warmer charcoal)
+   Both themes are dark. No light/beige mode.
+   ═══════════════════════════════════════════════════════════════ */
+
+@theme {
+  --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+}
+
+/* ───────────────────────────────────────────
+   Night Theme (Default) — Cooler Charcoal
+   ─────────────────────────────────────────── */
+:root,
+[data-theme="night"] {
+  --bg: #0B0D0F;
+  --surface: #111417;
+  --surface-alt: #15191D;
+  --border: #252A2E;
+  --border-subtle: rgba(196, 154, 82, 0.08);
+
+  --text: #E8E5DE;
+  --text-muted: #8A8F91;
+  --text-faint: #656B6E;
+
+  --accent: #C49A52;
+  --accent-hover: #D4AA62;
+  --accent-subtle: rgba(196, 154, 82, 0.10);
+  --accent-muted: rgba(196, 154, 82, 0.50);
+
+  --danger: #A9574F;
+  --danger-subtle: rgba(169, 87, 79, 0.12);
+  --success: #5a9a6a;
+  --success-subtle: rgba(90, 154, 106, 0.12);
+
+  --nav-bg: rgba(11, 13, 15, 0.95);
+  --overlay: rgba(11, 13, 15, 0.85);
+  --input-bg: #0F1215;
+  --input-border: #252A2E;
+  --input-focus: rgba(196, 154, 82, 0.25);
+
+  color-scheme: dark;
+}
+
+/* ───────────────────────────────────────────
+   Morning Theme — Warmer Charcoal
+   Still dark, slightly warmer undertones
+   ─────────────────────────────────────────── */
+[data-theme="morning"] {
+  --bg: #0E100F;
+  --surface: #141614;
+  --surface-alt: #191C19;
+  --border: #2A2D2A;
+  --border-subtle: rgba(196, 154, 82, 0.10);
+
+  --text: #EAE7DF;
+  --text-muted: #908A82;
+  --text-faint: #6A665E;
+
+  --accent: #C49A52;
+  --accent-hover: #D4AA62;
+  --accent-subtle: rgba(196, 154, 82, 0.12);
+  --accent-muted: rgba(196, 154, 82, 0.50);
+
+  --danger: #A9574F;
+  --danger-subtle: rgba(169, 87, 79, 0.12);
+  --success: #5a9a6a;
+  --success-subtle: rgba(90, 154, 106, 0.12);
+
+  --nav-bg: rgba(14, 16, 15, 0.95);
+  --overlay: rgba(14, 16, 15, 0.85);
+  --input-bg: #121412;
+  --input-border: #2A2D2A;
+  --input-focus: rgba(196, 154, 82, 0.25);
+
+  color-scheme: dark;
+}
+
+/* ───────────────────────────────────────────
+   Base Styles
+   ─────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+  transition: background-color 0.4s ease, color 0.4s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ───────────────────────────────────────────
+   Typography System
+   Display/Headings: Instrument Serif
+   Body/UI: Inter
+   Technical/Mono: IBM Plex Mono
+   ─────────────────────────────────────────── */
+h1, h2, h3,
+.font-serif,
+.heading {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-weight: 400;
+}
+
+.font-display {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-weight: 400;
+}
+
+/* ───────────────────────────────────────────
+   Scrollbar
+   ─────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* ───────────────────────────────────────────
+   Selection
+   ─────────────────────────────────────────── */
+::selection {
+  background-color: var(--accent);
+  color: var(--bg);
+}
+
+/* ───────────────────────────────────────────
+   Animations (restrained)
+   ─────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.6s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out forwards;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* ───────────────────────────────────────────
+   Form Elements
+   ─────────────────────────────────────────── */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+textarea {
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  padding: 0.625rem 0.75rem;
+  transition: border-color 0.2s ease;
+  outline: none;
+  width: 100%;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--input-focus);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+}
+
+/* ───────────────────────────────────────────
+   Button Base
+   ─────────────────────────────────────────── */
+.btn-primary {
+  background-color: var(--accent);
+  color: var(--bg);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary:hover {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  background-color: transparent;
+  color: var(--text);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+  letter-spacing: 0.02em;
+}
+
+.btn-outline:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ───────────────────────────────────────────
+   Difficulty Badges
+   ─────────────────────────────────────────── */
+.badge-easy {
+  background-color: rgba(90, 154, 106, 0.15);
+  color: #5a9a6a;
+  border: 1px solid rgba(90, 154, 106, 0.25);
+}
+
+.badge-medium {
+  background-color: rgba(196, 154, 82, 0.15);
+  color: #C49A52;
+  border: 1px solid rgba(196, 154, 82, 0.25);
+}
+
+.badge-hard {
+  background-color: rgba(169, 87, 79, 0.15);
+  color: #A9574F;
+  border: 1px solid rgba(169, 87, 79, 0.25);
+}
+
+.badge-expert {
+  background-color: rgba(122, 90, 184, 0.15);
+  color: #7a5ab8;
+  border: 1px solid rgba(122, 90, 184, 0.25);
+}
+
+/* ───────────────────────────────────────────
+   Reduced Motion
+   ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}

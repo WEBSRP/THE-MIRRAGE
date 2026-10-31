@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { downloadVpnConfig, downloadSignalConfig } from '../services/vpnService';
+import { Button } from './ui';
+import { Icon } from './Icon';
 
-/**
- * StartPlayingModal — "Want to try this?" modal (reference screen 05).
- * Shows VPN and Signal download options before entering the environment.
- */
 export function StartPlayingModal({
   isOpen,
   onClose,
@@ -24,7 +22,7 @@ export function StartPlayingModal({
     try {
       await downloadVpnConfig();
     } catch {
-      // Silent fail — VPN might not be configured yet
+      // Silent fail
     }
     setDownloadingVpn(false);
   };
@@ -40,85 +38,85 @@ export function StartPlayingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
+    <div className="ui-dialog-backdrop is-open" style={{ zIndex: 9999 }}>
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded w-full max-w-md mx-4 p-6 animate-fade-in">
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-[var(--text-faint)] hover:text-[var(--text)] transition-colors cursor-pointer text-lg"
-          aria-label="Close"
-        >
-          ×
-        </button>
-
-        {/* Content */}
-        <h2 className="font-serif text-xl text-[var(--text)] mb-2">Want to try this?</h2>
-        <p className="text-[var(--text-muted)] text-sm mb-6 leading-relaxed">
-          MIRRAGE runs in an isolated environment. You'll need a VPN connection to enter the challenge network.
-        </p>
-
-        {/* Download cards */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          {/* VPN Card */}
+        aria-labelledby="start-modal-title"
+        aria-modal="true"
+        className="ui-dialog"
+        role="dialog"
+        style={{ maxWidth: '480px' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <span className="platform-eyebrow">Isolated Range</span>
           <button
-            onClick={handleDownloadVpn}
-            disabled={downloadingVpn}
-            className="bg-[var(--surface-alt)] border border-[var(--border)] rounded p-4 text-center hover:border-[var(--accent)]/30 transition-colors cursor-pointer group"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '1.25rem' }}
+            aria-label="Close"
           >
-            <div className="flex justify-center mb-2">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent)]">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-            </div>
-            <p className="text-[var(--text)] text-sm font-medium">Download VPN</p>
-            <p className="text-[var(--text-faint)] text-[11px] mt-0.5">
-              {downloadingVpn ? 'Downloading...' : 'Get your OpenVPN profile'}
-            </p>
-          </button>
-
-          {/* Signal Card */}
-          <button
-            onClick={handleDownloadSignal}
-            disabled={downloadingSignal}
-            className="bg-[var(--surface-alt)] border border-[var(--border)] rounded p-4 text-center hover:border-[var(--accent)]/30 transition-colors cursor-pointer group"
-          >
-            <div className="flex justify-center mb-2">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent)]">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-            </div>
-            <p className="text-[var(--text)] text-sm font-medium">Download Signal</p>
-            <p className="text-[var(--text-faint)] text-[11px] mt-0.5">
-              {downloadingSignal ? 'Downloading...' : 'Get announcements and updates'}
-            </p>
+            ×
           </button>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-3">
+        <h2 id="start-modal-title" style={{ margin: '0 0 0.5rem', fontFamily: 'var(--font-display)', fontSize: '1.5rem' }}>
+          Connect to the Environment
+        </h2>
+        <p style={{ color: 'var(--muted)', fontSize: '0.875rem', lineHeight: 1.6, margin: '0 0 1.25rem' }}>
+          MIRRAGE runs isolated challenge environments inside Kubernetes. You need an active OpenVPN connection to reach target services.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
           <button
-            onClick={onConfirm}
-            className="btn-primary flex-1 flex items-center justify-center gap-2"
+            type="button"
+            onClick={() => { void handleDownloadVpn(); }}
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--line)',
+              borderRadius: 'var(--radius)',
+              cursor: 'pointer',
+              textAlign: 'center',
+              padding: '1rem',
+              color: 'var(--white)',
+            }}
           >
-            Let's Go <span>→</span>
+            <div style={{ color: 'var(--lime)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+              <Icon name="download" size={24} />
+            </div>
+            <strong style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>VPN Profile</strong>
+            <small style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+              {downloadingVpn ? 'Downloading...' : 'Get .ovpn profile'}
+            </small>
           </button>
+
           <button
-            onClick={onClose}
-            className="btn-outline flex-1"
+            type="button"
+            onClick={() => { void handleDownloadSignal(); }}
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--line)',
+              borderRadius: 'var(--radius)',
+              cursor: 'pointer',
+              textAlign: 'center',
+              padding: '1rem',
+              color: 'var(--white)',
+            }}
           >
+            <div style={{ color: 'var(--blue, #38bdf8)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+              <Icon name="activity" size={24} />
+            </div>
+            <strong style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Signal Profile</strong>
+            <small style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+              {downloadingSignal ? 'Downloading...' : 'Get connection metadata'}
+            </small>
+          </button>
+        </div>
+
+        <div className="ui-dialog-actions" style={{ display: 'flex', gap: '0.75rem' }}>
+          <Button onClick={onClose} style={{ flex: 1 }} variant="secondary">
             Maybe Later
-          </button>
+          </Button>
+          <Button onClick={onConfirm} style={{ flex: 1 }} variant="primary" icon="arrow-right">
+            Let's Go
+          </Button>
         </div>
       </div>
     </div>
