@@ -1,0 +1,334 @@
+/* All selectors are scoped to these visuals; no legacy scene classes are reused. */
+.mxv-core,
+.mxv-network,
+.mxv-studio-preview {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  color: var(--white, #edf3ef);
+  font-family: var(--design-font, sans-serif);
+}
+
+.mxv-core *,
+.mxv-network * {
+  box-sizing: border-box;
+}
+
+.mxv-core {
+  isolation: isolate;
+  container-type: inline-size;
+  padding: 18px 0 8px;
+  background: transparent;
+}
+
+.mxv-core-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-inline: 5%;
+  color: var(--muted, #86928e);
+  font: 9px/1.5 var(--design-mono, monospace);
+  letter-spacing: 0.14em;
+}
+
+.mxv-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: pan-y pinch-zoom;
+  user-select: none;
+  -webkit-user-select: none;
+  outline-offset: -3px;
+}
+
+.mxv-viewport[data-rotatable='true'] { cursor: grab; }
+.mxv-viewport[data-dragging='true'] { cursor: grabbing; }
+
+.mxv-core-viewport {
+  height: clamp(340px, 43vw, 640px);
+}
+
+.mxv-canvas,
+.mxv-fallback {
+  position: absolute;
+  display: block;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mxv-canvas[hidden] { display: none; }
+
+.mxv-fallback {
+  pointer-events: none;
+  color: var(--lime, #c6ff62);
+}
+
+.mxv-fallback-orbit { stroke: var(--blue, #78d9ff); }
+.mxv-fallback-node { fill: var(--ink, #070c10); stroke: currentColor; }
+.mxv-fallback-label { fill: var(--muted-light, #a9b5b0); font: 10px var(--design-mono, monospace); }
+
+.mxv-core-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline: 5%;
+}
+
+.mxv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted-light, #a9b5b0);
+  font: 10px/1.5 var(--design-mono, monospace);
+}
+
+.mxv-status i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: var(--lime, #c6ff62);
+}
+
+.mxv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mxv-button,
+.mxv-node-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid var(--line, rgba(221, 239, 229, 0.13));
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-light, #a9b5b0);
+  font: 10px/1.4 var(--design-mono, monospace);
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: none;
+}
+
+.mxv-button--square { min-width: 36px; padding-inline: 8px; font-size: 17px; }
+.mxv-button--accent { color: var(--lime, #c6ff62); border-color: var(--lime, #c6ff62); }
+
+.mxv-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mxv-button:enabled:hover,
+.mxv-node-button:hover,
+.mxv-node-button[aria-pressed='true'] {
+  color: var(--lime, #c6ff62);
+  border-color: var(--lime, #c6ff62);
+  background: var(--lime-soft, rgba(198, 255, 98, 0.08));
+}
+
+.mxv-button:focus-visible,
+.mxv-node-button:focus-visible,
+.mxv-viewport:focus-visible {
+  outline: 2px solid var(--lime, #c6ff62);
+  outline-offset: 3px;
+}
+
+.mxv-viewport:focus-visible { outline-offset: -3px; }
+
+.mxv-help {
+  margin: 12px 0 0;
+  color: var(--muted, #86928e);
+  font: 10px/1.65 var(--design-mono, monospace);
+  text-wrap: pretty;
+}
+
+.mxv-core > .mxv-help { padding-inline: 5%; }
+
+.mxv-network {
+  container-type: inline-size;
+  padding: 22px;
+  border: 1px solid var(--line, rgba(221, 239, 229, 0.13));
+  border-radius: var(--design-radius-small, 3px);
+  background: transparent;
+}
+
+.mxv-network-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mxv-eyebrow {
+  display: block;
+  color: var(--muted, #86928e);
+  font: 9px/1.5 var(--design-mono, monospace);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.mxv-network-header h3 {
+  margin: 6px 0 0;
+  color: var(--white, #edf3ef);
+  font-family: var(--design-display-font, sans-serif);
+  font-size: clamp(16px, 2vw, 23px);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.03em;
+}
+
+.mxv-zoom {
+  min-width: 39px;
+  color: var(--muted, #86928e);
+  font: 10px/1 var(--design-mono, monospace);
+  text-align: center;
+}
+
+.mxv-network-viewport { height: clamp(300px, 32vw, 430px); margin-top: 12px; }
+
+.mxv-map-caption {
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+  pointer-events: none;
+  color: var(--muted, #86928e);
+  font: 8px/1.5 var(--design-mono, monospace);
+  letter-spacing: 0.14em;
+}
+
+.mxv-node-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.mxv-node-button {
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mxv-node-button > span { opacity: 0.55; font-size: 8px; }
+
+.mxv-inspector {
+  margin-top: 17px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line, rgba(221, 239, 229, 0.13));
+}
+
+.mxv-inspector-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.mxv-inspector-title strong { font-size: 14px; font-weight: 500; }
+.mxv-inspector-title > span { color: var(--lime, #c6ff62); font: 9px var(--design-mono, monospace); }
+
+.mxv-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin: 14px 0 0;
+}
+
+.mxv-details dt {
+  margin-bottom: 5px;
+  color: var(--muted, #86928e);
+  font: 8px/1.4 var(--design-mono, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mxv-details dd { margin: 0; color: var(--muted-light, #a9b5b0); font: 11px/1.4 var(--design-mono, monospace); }
+
+.mxv-connections {
+  margin: 13px 0 0;
+  color: var(--muted-light, #a9b5b0);
+  font: 10px/1.7 var(--design-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.mxv-connections > span { color: var(--muted, #86928e); margin-right: 6px; }
+
+.mxv-core--compact { padding-top: 0; }
+.mxv-core--compact .mxv-core-meta { display: none; }
+.mxv-core--compact .mxv-core-viewport { height: clamp(140px, 24vw, 260px); }
+.mxv-core--compact .mxv-core-footer { justify-content: center; padding-inline: 0; gap: 9px; }
+.mxv-core--compact .mxv-controls { justify-content: center; }
+.mxv-core--compact > .mxv-help { text-align: center; padding-inline: 0; font-size: 9px; }
+.mxv-core--compact .mxv-status { font-size: 9px; }
+
+.mxv-network--compact { border: 0; padding: 0; }
+.mxv-network--compact .mxv-network-header { gap: 10px; }
+.mxv-network--compact .mxv-network-header h3 { font-size: 15px; }
+.mxv-network--compact .mxv-eyebrow { font-size: 8px; }
+.mxv-network--compact .mxv-network-viewport { height: 210px; margin-top: 6px; }
+.mxv-network--compact .mxv-node-button { padding-inline: 7px; font-size: 9px; }
+.mxv-network--compact .mxv-inspector { margin-top: 12px; padding-top: 12px; }
+.mxv-network--compact .mxv-details { gap: 10px 18px; }
+
+.mxv-studio-preview {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.5fr);
+  align-items: center;
+  gap: 24px;
+}
+
+@container (max-width: 260px) {
+  .mxv-core-viewport { height: 170px; }
+  .mxv-core-meta { justify-content: center; }
+  .mxv-core-meta span:last-child { display: none; }
+  .mxv-core-footer { justify-content: center; }
+  .mxv-core--compact .mxv-core-viewport { height: 155px; }
+  .mxv-core--compact .mxv-button { min-height: 32px; padding: 6px 7px; font-size: 9px; }
+  .mxv-core--compact .mxv-status { font-size: 8px; gap: 5px; }
+  .mxv-core--compact > .mxv-help { font-size: 8px; }
+}
+
+@container (max-width: 420px) {
+  .mxv-network-header { align-items: flex-start; }
+  .mxv-network-header .mxv-controls { gap: 4px; }
+  .mxv-network-header .mxv-button { padding-inline: 8px; }
+  .mxv-network-viewport { height: 290px; }
+  .mxv-network--compact .mxv-network-viewport { height: 220px; }
+  .mxv-node-button { flex-grow: 1; }
+}
+
+@media (pointer: coarse) {
+  .mxv-core .mxv-button,
+  .mxv-network .mxv-button,
+  .mxv-network .mxv-node-button { min-height: 44px; }
+  .mxv-button--square { min-width: 44px; }
+}
+
+@media (max-width: 600px) {
+  .mxv-studio-preview { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .mxv-network:not(.mxv-network--compact) { padding: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mxv-core *,
+  .mxv-network * { animation: none !important; transition: none !important; }
+}
