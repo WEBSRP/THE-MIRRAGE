@@ -30,7 +30,8 @@ async def test_start_session_lifecycle(async_client: AsyncClient, auth_headers: 
     assert start_data["status"] == SessionStatus.READY
     # Verify Decoy IP is in 10.42.0.x
     assert start_data["mirage_ip"].startswith("10.42.0.")
-    assert start_data["mirage_port"] == 22
+    assert start_data["mirage_port"] == 2222
+    assert start_data["ctf_port"] == 22
     # Verify CTF IP is NEVER exposed in the response
     assert "ctf_ip" not in start_data
 

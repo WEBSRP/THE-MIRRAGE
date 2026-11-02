@@ -112,7 +112,20 @@ class ProductionKubernetesService(KubernetesService):
         
         container_security_context = client.V1SecurityContext(
             allow_privilege_escalation=False,
-            capabilities=client.V1Capabilities(drop=["ALL"]),
+            capabilities=client.V1Capabilities(
+                drop=["ALL"],
+                add=[
+                    "SYS_CHROOT",
+                    "SETUID",
+                    "SETGID",
+                    "CHOWN",
+                    "DAC_OVERRIDE",
+                    "FOWNER",
+                    "KILL",
+                    "AUDIT_WRITE",
+                    "NET_BIND_SERVICE",
+                ]
+            ),
             read_only_root_filesystem=False,
             run_as_non_root=False
         )
@@ -122,13 +135,13 @@ class ProductionKubernetesService(KubernetesService):
         )
 
         mirage_readiness = client.V1Probe(
-            tcp_socket=client.V1TCPSocketAction(port=22),
+            tcp_socket=client.V1TCPSocketAction(port=2222),
             initial_delay_seconds=2,
             period_seconds=2,
             failure_threshold=15
         )
         ctf_readiness = client.V1Probe(
-            tcp_socket=client.V1TCPSocketAction(port=2222),
+            tcp_socket=client.V1TCPSocketAction(port=80),
             initial_delay_seconds=2,
             period_seconds=2,
             failure_threshold=15
@@ -144,7 +157,7 @@ class ProductionKubernetesService(KubernetesService):
             security_context=container_security_context,
             readiness_probe=mirage_readiness,
             ports=[
-                client.V1ContainerPort(container_port=22, name="mirage-ssh")
+                client.V1ContainerPort(container_port=2222, name="mirage-ssh")
             ],
             env=[
                 client.V1EnvVar(name="USERNAME", value=username)
@@ -161,7 +174,8 @@ class ProductionKubernetesService(KubernetesService):
             security_context=container_security_context,
             readiness_probe=ctf_readiness,
             ports=[
-                client.V1ContainerPort(container_port=2222, name="ctf-internal")
+                client.V1ContainerPort(container_port=22, name="ctf-ssh"),
+                client.V1ContainerPort(container_port=80, name="ctf-http")
             ]
         )
         
