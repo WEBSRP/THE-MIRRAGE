@@ -18,13 +18,13 @@ spec:
   restartPolicy: Never
   containers:
     # -------------------------------------------------------------
-    # Container 1: Mirage Honeypot (Decoy SSH on Port 22)
-    # The decoy environment the player initially connects to.
+    # Container 1: Mirage Honeypot (Management SSH on Port 2222)
+    # The decoy/management environment.
     # -------------------------------------------------------------
     - name: mirage-honeypot
       image: mirrage/mirage-honeypot:latest
       ports:
-        - containerPort: 22
+        - containerPort: 2222
           name: mirage-ssh
       resources:
         limits:
@@ -39,6 +39,16 @@ spec:
         capabilities:
           drop:
             - ALL
+          add:
+            - SYS_CHROOT
+            - SETUID
+            - SETGID
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - KILL
+            - AUDIT_WRITE
+            - NET_BIND_SERVICE
       env:
         - name: SESSION_ID
           value: "session-template"
@@ -46,14 +56,16 @@ spec:
           value: "player"
 
     # -------------------------------------------------------------
-    # Container 2: CTF Challenge Core (Internal Port 2222)
-    # The real target environment discovered through deception clues.
+    # Container 2: CTF Challenge Core (Player Access: SSH 22, HTTP 80)
+    # The real target environment containing the challenge.
     # -------------------------------------------------------------
     - name: ctf-core
       image: mirrage/ctf-core:latest
       ports:
-        - containerPort: 2222
-          name: ctf-internal
+        - containerPort: 22
+          name: ctf-ssh
+        - containerPort: 80
+          name: ctf-http
       resources:
         limits:
           cpu: "300m"
@@ -64,6 +76,19 @@ spec:
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false
+        capabilities:
+          drop:
+            - ALL
+          add:
+            - SYS_CHROOT
+            - SETUID
+            - SETGID
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - KILL
+            - AUDIT_WRITE
+            - NET_BIND_SERVICE
       env:
         - name: SESSION_ID
           value: "session-template"

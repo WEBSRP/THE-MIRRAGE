@@ -22,12 +22,13 @@ RUN useradd -m -s /bin/bash admin && \
 RUN mkdir -p /opt/mirrage /var/log/mirrage && \
     chown -R admin:admin /opt/mirrage
 
-# SSH configuration
+# SSH configuration (Port 2222 for MIRRAGE management/internal access)
 RUN sed -i \
     -e 's/#PasswordAuthentication yes/PasswordAuthentication yes/' \
     -e 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' \
-    /etc/ssh/sshd_config
+    /etc/ssh/sshd_config && \
+    echo "Port 2222" >> /etc/ssh/sshd_config
 
-EXPOSE 22
+EXPOSE 2222
 
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+CMD ["/usr/sbin/sshd", "-D", "-e", "-p", "2222"]

@@ -13,7 +13,8 @@ class SessionResponse(BaseModel):
     session_id: str
     mirage_ip: Optional[str] = None
     status: SessionStatus
-    mirage_port: int = 22
+    mirage_port: int = 2222
+    ctf_port: int = 22
     player_vpn_ip: Optional[str] = None
     expires_at: Optional[datetime] = None
     initialization_deadline: Optional[datetime] = None
@@ -27,7 +28,8 @@ class SessionStatusResponse(BaseModel):
     session_id: str
     status: SessionStatus
     mirage_ip: Optional[str] = None
-    mirage_port: int = 22
+    mirage_port: int = 2222
+    ctf_port: int = 22
     player_vpn_ip: Optional[str] = None
     created_at: datetime
     ready_at: Optional[datetime] = None

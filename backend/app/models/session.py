@@ -57,9 +57,9 @@ class GameSession(Base):
     # Player's assigned VPN IP (e.g. 10.8.0.X)
     player_vpn_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
 
-    # Ports
-    mirage_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
-    ctf_port: Mapped[int] = mapped_column(Integer, default=2222, nullable=False)
+    # Ports (CTF port 22 for player access; Mirage port 2222 for management access)
+    mirage_port: Mapped[int] = mapped_column(Integer, default=2222, nullable=False)
+    ctf_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
 
     # Lifecycle & Timestamps
     created_at: Mapped[datetime] = mapped_column(

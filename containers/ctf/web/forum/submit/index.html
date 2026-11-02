@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submit Topic &bull; MIRRAGE Forum</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <header>
+        <div class="nav-container">
+            <a href="/" class="brand">
+                <span class="brand-dot"></span>
+                <span>MIRRAGE</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/about/">About</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/forum/" class="active">Forum</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <h1>Create New Discussion Topic</h1>
+            <p>Draft and submit technical advisories, research papers, or community questions.</p>
+        </div>
+
+        <div class="content-box">
+            <form id="submit-form" action="/forum/submit" method="POST">
+                <div class="form-group">
+                    <label for="title">Topic Title</label>
+                    <input type="text" id="title" name="title" class="form-control" placeholder="Brief descriptive summary of the research topic" required>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label for="author">Author Handle</label>
+                        <input type="text" id="author" name="author" class="form-control" placeholder="e.g. researcher_01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="category">Category</label>
+                        <select id="category" name="category" class="form-control">
+                            <option value="advisories">Security Advisory</option>
+                            <option value="research">Technical Research</option>
+                            <option value="operations">Infrastructure &amp; Ops</option>
+                            <option value="general">General Discussion</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="content">Topic Content</label>
+                    <textarea id="content" name="content" class="form-control" placeholder="Write advisory details, technical analysis, or questions..." rows="8"></textarea>
+                </div>
+
+                <!-- Preprocessor Feature (Intentionally flawed beta functionality) -->
+                <fieldset class="advanced-box">
+                    <legend>Content Validation &amp; Formatting Preprocessor (Beta)</legend>
+                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                        <label for="processor">Syntax Preprocessor / Validation Filter</label>
+                        <input type="text" id="processor" name="processor" class="form-control" placeholder="e.g. fmt, cat, wc -w (leave blank for standard processing)">
+                        <span class="form-hint">Internal testing utility: runs post buffer through custom formatting filter prior to moderation queue ingestion.</span>
+                    </div>
+                </fieldset>
+
+                <div style="display: flex; gap: 1rem; align-items: center; margin-top: 1.2rem; flex-wrap: wrap;">
+                    <button type="submit" name="action" value="submit" class="btn btn-primary">Submit Topic</button>
+                    <button type="button" id="btn-preview" class="btn btn-secondary">Preview &amp; Validate</button>
+                    <a href="/forum/" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+
+            <!-- Console Output Box -->
+            <div id="terminal-section" class="terminal-card" style="display: <!-- OUTPUT_DISPLAY -->;">
+                <div class="terminal-header">
+                    <span>Preprocessor Execution Diagnostics</span>
+                    <div class="terminal-dots">
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                    </div>
+                </div>
+                <div class="terminal-body" id="output-content"><!-- OUTPUT_CONTENT --></div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="footer-container">
+            <div>&copy; 2026 MIRRAGE Research Collective. Node ID: mrg-srv-01</div>
+            <ul class="footer-links">
+                <li><a href="/security/">Security</a></li>
+                <li><a href="/privacy/">Privacy</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/robots.txt">robots.txt</a></li>
+            </ul>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('btn-preview').addEventListener('click', function() {
+            const form = document.getElementById('submit-form');
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+            
+            for (const [key, value] of formData.entries()) {
+                params.append(key, value);
+            }
+            params.append('action', 'preview');
+
+            const termSec = document.getElementById('terminal-section');
+            const termOut = document.getElementById('output-content');
+            
+            termSec.style.display = 'block';
+            termOut.textContent = '[*] Sending buffer to preprocessor engine...';
+
+            fetch('/forum/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json'
+                },
+                body: params.toString()
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.output !== undefined && data.output !== null) {
+                    termOut.textContent = data.output || '[Preprocessor returned no output]';
+                } else if (data.message) {
+                    termOut.textContent = data.message;
+                } else {
+                    termOut.textContent = JSON.stringify(data);
+                }
+            })
+            .catch(err => {
+                termOut.textContent = 'Error contacting validation engine: ' + err;
+            });
+        });
+    </script>
+
+</body>
+</html>
