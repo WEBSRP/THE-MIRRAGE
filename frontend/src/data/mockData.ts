@@ -77,15 +77,11 @@ export type LeaderboardEntry = {
   isCurrentUser?: boolean;
 };
 
-export const DEMO_EMAIL = 'operator@mirrage.me';
-export const DEMO_PASSWORD = 'observe';
-export const DEMO_OTP = '424242';
-
 export const mockUser: MockUser = {
   id: 'usr_001',
   name: 'Avery Chen',
   username: 'aetherline',
-  email: DEMO_EMAIL,
+  email: '',
   role: 'Field operator',
   createdAt: '2026-01-14',
   points: 1280,

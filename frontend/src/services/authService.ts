@@ -53,12 +53,6 @@ export function isAuthenticated(): boolean {
   return getToken() !== null;
 }
 
-export async function devLogin(): Promise<AuthResponse> {
-  const result = await api.post<AuthResponse>('/api/v1/auth/dev-login');
-  localStorage.setItem('mirrage-token', result.access_token);
-  return result;
-}
-
 export interface OtpResponse {
   message: string;
 }

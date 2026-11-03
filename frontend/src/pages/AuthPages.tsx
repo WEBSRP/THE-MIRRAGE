@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'rea
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { Button, Card, PasswordField, TextField } from '../components/ui';
-import { useApp, mockCredentials } from '../state/AppState';
+import { useApp } from '../state/AppState';
 
 function AuthIntro({ eyebrow, title, copy }: { eyebrow: string; title: ReactNode; copy: string }) {
   return (
@@ -15,32 +15,23 @@ function AuthIntro({ eyebrow, title, copy }: { eyebrow: string; title: ReactNode
 }
 
 export function LoginPage() {
-  const { login, requestOtp, devLogin, isAuthLoading } = useApp();
+  const { login, requestOtp, isAuthLoading } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
-    setNotice('');
     const result = await login(identifier, password);
     if (!result.ok) {
       setError(result.message ?? 'Unable to sign in.');
       return;
     }
     navigate(from, { replace: true });
-  };
-
-  const useDemo = () => {
-    setIdentifier(mockCredentials.email);
-    setPassword(mockCredentials.password);
-    setError('');
-    setNotice('Operator test credentials loaded. Submit to enter the range.');
   };
 
   const handleOtp = async () => {
@@ -57,16 +48,6 @@ export function LoginPage() {
     navigate('/verify-otp', { state: { email: identifier, from } });
   };
 
-  const handleDevLogin = async () => {
-    setError('');
-    const result = await devLogin();
-    if (!result.ok) {
-      setError(result.message ?? 'Dev access unavailable.');
-    } else {
-      navigate(from, { replace: true });
-    }
-  };
-
   return (
     <div className="auth-form-wrap">
       <AuthIntro
@@ -81,17 +62,11 @@ export function LoginPage() {
             <span>{error}</span>
           </div>
         ) : null}
-        {notice ? (
-          <div className="auth-alert auth-alert-success">
-            <Icon name="check" size={16} />
-            <span>{notice}</span>
-          </div>
-        ) : null}
         <TextField
           autoComplete="username"
           label="Email or username"
           onChange={(event) => setIdentifier(event.target.value)}
-          placeholder="operator@mirrage.me"
+          placeholder="you@example.com"
           required
           value={identifier}
         />
@@ -107,17 +82,10 @@ export function LoginPage() {
           <button className="auth-text-button" onClick={handleOtp} type="button">
             Use email code <Icon name="arrow-up-right" size={13} />
           </button>
-          <button className="auth-text-button" onClick={handleDevLogin} type="button" title="Quick dev access in dev mode">
-            Dev access
-          </button>
         </div>
         <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
           Enter the range <Icon name="arrow-right" size={16} />
         </Button>
-        <button className="demo-credentials" onClick={useDemo} type="button">
-          <span><Icon name="spark" size={14} /> Load test credentials</span>
-          <small>{mockCredentials.email} / ••••••••</small>
-        </button>
       </form>
       <div className="auth-switch">
         New to the range? <Link to="/register">Create an operator account <Icon name="arrow-up-right" size={14} /></Link>
@@ -364,7 +332,7 @@ export function ForgotPasswordPage() {
             autoComplete="email"
             label="Account email"
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="operator@mirrage.me"
+            placeholder="you@example.com"
             required
             type="email"
             value={email}

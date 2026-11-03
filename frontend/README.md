@@ -21,23 +21,15 @@ npm run test:visuals
 
 Use Node 22.13+ for the visual geometry tests. All account, VPN, session, and challenge actions remain frontend-only simulations.
 
-## Mock workflows
+## Authentication and workflows
 
-This revamp is intentionally backend-free. The protected workspace is unlocked with:
-
-```text
-email:    operator@mirrage.me
-password: observe
-OTP:      424242
-```
-
-Mock auth, challenge progress, VPN state, sessions, profile edits, settings, and theme preferences are stored in browser local storage for the current demo.
+Authentication uses the configured API service; no development login or credentials are bundled in the frontend. Challenge progress, VPN state, sessions, profile edits, settings, and theme preferences use the app's configured services and browser state where applicable.
 
 Available routes include `/login`, `/register`, `/verify-otp`, `/forgot-password`, `/reset-password`, `/dashboard`, `/vpn`, `/challenges`, `/challenges/:id`, `/sessions`, `/profile`, and `/settings`.
 
 ## Design Studio
 
-The `Explore Designs` / `Design Studio` control is available on the public surface and in the authenticated workspace. It provides 18 starting presets, live search and category filters, favorites, recent designs, side-by-side comparisons, previous/next navigation, random combinations, custom preset saving, motion intensity, and an independent 3D-effects switch.
+The `Explore Designs` / `Design Studio` control is available on the public surface and in the authenticated workspace. It provides 18 starting presets, live search and category filters, favorites, recent designs, side-by-side comparisons, previous/next navigation, random combinations, custom preset saving, motion intensity, an independent 3D-effects switch, and a Logo Lab with Signal Core, Cyber Grid, Egyptian Eye, Critical Signal, and Cipher Orbit marks. Static and dynamic logo choices persist locally and update the interface wordmark plus browser favicon.
 
 The selected preset, favorites, recent designs, custom presets, animation preference, and 3D preference are stored under separate `mirrage-design-*` browser keys so visual exploration never resets account, challenge, VPN, or session state.
 
@@ -59,7 +51,7 @@ The renderer uses procedural 3D coordinates projected onto a transparent Canvas 
 1. Open `/`, rotate and activate the core, then pause and reset it.
 2. Open **Explore Designs**, select a preset, switch light/dark, and reload. The design should persist.
 3. Enable reduced motion or disable 3D in the studio. Automatic motion should stop; node inspection remains usable.
-4. Sign in with the mock credentials above. Inspect a node in `/dashboard`, zoom, reset, and switch to 2D.
-5. At 320px and desktop widths, check the landing menu, workspace navigation, and scene controls. Changing designs must leave the demo login and progress intact.
+4. Sign in through the configured authentication flow. Inspect a node in `/dashboard`, zoom, reset, and switch to 2D.
+5. At 320px and desktop widths, check the landing menu, workspace navigation, and scene controls. Changing designs must leave the current account and progress intact.
 
 Chromium checks were run for these interactions, responsive layouts, offscreen/hidden-tab suspension, and canvas fallback. Safari, Firefox, and physical low-powered hardware have not been verified.

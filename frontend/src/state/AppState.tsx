@@ -17,7 +17,6 @@ import {
   logout as apiLogout,
   requestOtp as apiRequestOtp,
   verifyOtp as apiVerifyOtp,
-  devLogin as apiDevLogin,
   getToken,
   type User as ApiUser,
 } from '../services/authService';
@@ -66,7 +65,6 @@ export type AppContextValue = {
   requestOtp: (email: string) => Promise<AuthResult>;
   verifyOtp: (code: string, email?: string) => Promise<AuthResult>;
   logout: () => void;
-  devLogin: () => Promise<AuthResult>;
   resetPassword: (password: string) => Promise<AuthResult>;
   challenges: ExtendedChallenge[];
   solvedChallengeIds: string[];
@@ -144,7 +142,7 @@ function formatRelativeTime(timestamp: string): string {
 const defaultUser: MockUser & Partial<ApiUser> = {
   name: 'Operator',
   username: 'operator',
-  email: 'operator@mirrage.me',
+  email: '',
   role: 'Operator',
   avatar: 'O',
   points: 0,
@@ -431,21 +429,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [mapApiUserToMockUser, pendingOtpEmail, pushToast]);
 
-  const devLogin = useCallback(async (): Promise<AuthResult> => {
-    setIsAuthLoading(true);
-    try {
-      const res = await apiDevLogin();
-      setUser(mapApiUserToMockUser(res.user));
-      setIsAuthenticated(true);
-      pushToast('Dev session active', 'Authenticated as development operator', 'info');
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, message: err.message || 'Dev login is unavailable in this environment.' };
-    } finally {
-      setIsAuthLoading(false);
-    }
-  }, [mapApiUserToMockUser, pushToast]);
-
   const logout = useCallback(() => {
     apiLogout();
     setUser(defaultUser);
@@ -692,7 +675,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestOtp,
     verifyOtp,
     logout,
-    devLogin,
     resetPassword,
     challenges,
     solvedChallengeIds,
@@ -731,7 +713,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestOtp,
     verifyOtp,
     logout,
-    devLogin,
     resetPassword,
     challenges,
     solvedChallengeIds,
@@ -777,5 +758,3 @@ export function useTheme() {
   if (!context) throw new Error('useTheme must be used inside ThemeProvider');
   return context;
 }
-
-export const mockCredentials = { email: 'operator@mirrage.me', password: 'Password123!', otp: '424242' };

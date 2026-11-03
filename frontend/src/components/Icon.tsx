@@ -1,3 +1,5 @@
+import { LogoMark } from './LogoMark';
+
 export type IconName =
   | 'activity'
   | 'arrow-left'
@@ -108,7 +110,7 @@ export function Icon({ name, size = 18, className = '' }: { name: IconName; size
 }
 
 export function Mark() {
-  return <span aria-hidden="true" className="brand-mark"><span /><span /><span /></span>;
+  return <LogoMark />;
 }
 
 export function Wordmark({ link = true }: { link?: boolean }) {
