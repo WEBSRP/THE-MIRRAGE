@@ -18,6 +18,7 @@ export function LoginPage() {
   const { login, requestOtp, isAuthLoading } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
+  const [mode, setMode] = useState<'otp' | 'password'>('otp');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -34,7 +35,8 @@ export function LoginPage() {
     navigate(from, { replace: true });
   };
 
-  const handleOtp = async () => {
+  const handleOtp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (!identifier.includes('@')) {
       setError('Enter your email address first to request a one-time verification code.');
       return;
@@ -48,45 +50,78 @@ export function LoginPage() {
     navigate('/verify-otp', { state: { email: identifier, from } });
   };
 
+  const switchMode = (nextMode: 'otp' | 'password') => {
+    setMode(nextMode);
+    setError('');
+  };
+
   return (
     <div className="auth-form-wrap">
       <AuthIntro
         eyebrow="01 / access"
         title={<>Welcome back,<br /><em>operator.</em></>}
-        copy="The range is active. Sign in with password or request a one-time verification code."
+        copy={mode === 'otp' ? 'The range is active. Start with a one-time verification code sent to your email.' : 'Sign in with your password, or switch back to passwordless email verification.'}
       />
-      <form className="auth-form" onSubmit={handleSubmit}>
-        {error ? (
-          <div className="auth-alert auth-alert-error">
-            <Icon name="info" size={16} />
-            <span>{error}</span>
+      {mode === 'otp' ? (
+        <form className="auth-form" onSubmit={handleOtp}>
+          {error ? (
+            <div className="auth-alert auth-alert-error">
+              <Icon name="info" size={16} />
+              <span>{error}</span>
+            </div>
+          ) : null}
+          <TextField
+            autoComplete="email"
+            label="Email address"
+            onChange={(event) => setIdentifier(event.target.value)}
+            placeholder="you@example.com"
+            required
+            type="email"
+            value={identifier}
+          />
+          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
+            Send verification code <Icon name="send" size={16} />
+          </Button>
+          <div className="auth-form-meta auth-form-meta-centered">
+            <button className="auth-text-button" onClick={() => switchMode('password')} type="button">
+              Use password instead <Icon name="arrow-up-right" size={13} />
+            </button>
           </div>
-        ) : null}
-        <TextField
-          autoComplete="username"
-          label="Email or username"
-          onChange={(event) => setIdentifier(event.target.value)}
-          placeholder="you@example.com"
-          required
-          value={identifier}
-        />
-        <PasswordField
-          autoComplete="current-password"
-          label="Password"
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Enter your password"
-          required
-          value={password}
-        />
-        <div className="auth-form-meta">
-          <button className="auth-text-button" onClick={handleOtp} type="button">
-            Use email code <Icon name="arrow-up-right" size={13} />
-          </button>
-        </div>
-        <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-          Enter the range <Icon name="arrow-right" size={16} />
-        </Button>
-      </form>
+        </form>
+      ) : (
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {error ? (
+            <div className="auth-alert auth-alert-error">
+              <Icon name="info" size={16} />
+              <span>{error}</span>
+            </div>
+          ) : null}
+          <TextField
+            autoComplete="username"
+            label="Email or username"
+            onChange={(event) => setIdentifier(event.target.value)}
+            placeholder="you@example.com"
+            required
+            value={identifier}
+          />
+          <PasswordField
+            autoComplete="current-password"
+            label="Password"
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Enter your password"
+            required
+            value={password}
+          />
+          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
+            Enter with password <Icon name="arrow-right" size={16} />
+          </Button>
+          <div className="auth-form-meta auth-form-meta-centered">
+            <button className="auth-text-button" onClick={() => switchMode('otp')} type="button">
+              Use email code instead <Icon name="arrow-up-right" size={13} />
+            </button>
+          </div>
+        </form>
+      )}
       <div className="auth-switch">
         New to the range? <Link to="/register">Create an operator account <Icon name="arrow-up-right" size={14} /></Link>
       </div>
