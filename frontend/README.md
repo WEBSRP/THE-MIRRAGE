@@ -1,6 +1,6 @@
 # MIRRAGE frontend revamped
 
-Standalone React/Vite frontend for the refreshed public MIRRAGE experience. It intentionally lives beside the existing `frontend/` app and does not import from it.
+React/Vite frontend for the MIRRAGE platform. This is the active application in `frontend/`; the previous interface is retained separately in `frontend-old/`.
 
 ## Run locally
 
@@ -29,9 +29,13 @@ Sign in at `/login` with your email and verify the six-digit OTP sent to your in
 
 An opening notice explains that this educational project runs on demand and asks players to message their preferred date, time, and time zone. It appears once per browser tab session. Set the public `VITE_CONTACT_*_URL` variables shown in `.env.example` to HTTPS social profile URLs, then rebuild to enable those links. Unconfigured platforms appear as plain tags.
 
+Profile edits and notification preferences currently use browser state; theme and design preferences persist locally. No development login or test credentials are bundled in the frontend.
+
+Available pages include `/login`, `/verify-otp`, `/dashboard`, `/vpn`, `/challenges`, `/challenges/:id`, `/sessions`, `/leaderboard`, `/docs`, `/profile`, and `/settings`. Legacy `/register`, `/forgot-password`, and `/reset-password` URLs redirect to `/login`.
+
 ## Design Studio
 
-The `Explore Designs` / `Design Studio` control is available on the public surface and in the authenticated workspace. It provides 18 starting presets, live search and category filters, favorites, recent designs, side-by-side comparisons, previous/next navigation, random combinations, custom preset saving, motion intensity, and an independent 3D-effects switch.
+The `Explore Designs` / `Design Studio` control is available on the public surface and in the authenticated workspace. It provides 18 starting presets, live search and category filters, favorites, recent designs, side-by-side comparisons, previous/next navigation, random combinations, custom preset saving, motion intensity, an independent 3D-effects switch, and a Logo Lab with Signal Core, Cyber Grid, Egyptian Eye, Critical Signal, and Cipher Orbit marks. Static and dynamic logo choices persist locally and update the interface wordmark plus browser favicon.
 
 The selected preset, favorites, recent designs, custom presets, animation preference, and 3D preference are stored under separate `mirrage-design-*` browser keys so visual exploration never resets account, challenge, VPN, or session state.
 
@@ -54,6 +58,6 @@ The renderer uses procedural 3D coordinates projected onto a transparent Canvas 
 2. Open **Explore Designs**, select a preset, switch light/dark, and reload. The design should persist.
 3. Enable reduced motion or disable 3D in the studio. Automatic motion should stop; node inspection remains usable.
 4. Sign in using an email OTP. Inspect a node in `/dashboard`, zoom, reset, and switch to 2D.
-5. At 320px and desktop widths, check the landing menu, workspace navigation, and scene controls. Changing designs must leave the login and progress intact.
+5. At 320px and desktop widths, check the landing menu, workspace navigation, and scene controls. Changing designs must leave the current account and progress intact.
 
 Chromium checks were run for these interactions, responsive layouts, offscreen/hidden-tab suspension, and canvas fallback. Safari, Firefox, and physical low-powered hardware have not been verified.

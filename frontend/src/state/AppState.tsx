@@ -139,7 +139,7 @@ function formatRelativeTime(timestamp: string): string {
 const defaultUser: MockUser & Partial<ApiUser> = {
   name: 'Operator',
   username: 'operator',
-  email: 'operator@mirrage.me',
+  email: '',
   role: 'Operator',
   avatar: 'O',
   points: 0,

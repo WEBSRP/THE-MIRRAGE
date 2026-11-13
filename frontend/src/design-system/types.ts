@@ -1,4 +1,5 @@
 import type { Theme } from '../data/mockData';
+import type { LogoVariant, LogoVariantId } from './logoVariants';
 
 export type DesignPresetId =
   | 'cyberpunk-neon'
@@ -82,4 +83,7 @@ export type DesignContextValue = {
   savePreferred: () => void;
   resetDesign: () => void;
   saveCustomPreset: (name: string) => void;
+  logoVariant: LogoVariant;
+  logoVariants: LogoVariant[];
+  setLogoVariant: (id: LogoVariantId) => void;
 };

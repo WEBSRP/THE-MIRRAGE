@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTheme } from '../state/AppState';
 import { defaultPresets, getPreset } from './presets';
+import { createFaviconSvg, getLogoVariant, isLogoVariantId, logoVariants, type LogoVariantId } from './logoVariants';
 import type { DesignContextValue, DesignPreset, DesignPresetId } from './types';
 
 const DesignContext = createContext<DesignContextValue | null>(null);
@@ -9,6 +10,7 @@ const PREFERRED_KEY = 'mirrage-design-preferred';
 const FAVORITES_KEY = 'mirrage-design-favorites';
 const RECENT_KEY = 'mirrage-design-recent';
 const CUSTOM_KEY = 'mirrage-design-custom';
+const LOGO_KEY = 'mirrage-logo-variant';
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -32,7 +34,12 @@ export function DesignProvider({ children }: { children: ReactNode }) {
   const [recentPresetIds, setRecentPresetIds] = useState<DesignPresetId[]>(() => readJson<DesignPresetId[]>(RECENT_KEY, []));
   const [motionIntensity, setMotionIntensityState] = useState(() => Number(window.localStorage.getItem('mirrage-design-motion') ?? '1'));
   const [enable3d, setEnable3dState] = useState(() => window.localStorage.getItem('mirrage-design-3d') !== 'false');
+  const [logoVariantId, setLogoVariantId] = useState<LogoVariantId>(() => {
+    const stored = window.localStorage.getItem(LOGO_KEY);
+    return isLogoVariantId(stored) ? stored : 'signal-core';
+  });
   const preset = getPreset(presetId, allPresets);
+  const logoVariant = getLogoVariant(logoVariantId);
 
   useEffect(() => {
     if (!allPresets.some((item) => item.id === presetId)) setPresetId('cyberpunk-neon');
@@ -65,6 +72,15 @@ export function DesignProvider({ children }: { children: ReactNode }) {
   useEffect(() => { window.localStorage.setItem(CUSTOM_KEY, JSON.stringify(customPresets)); }, [customPresets]);
   useEffect(() => { window.localStorage.setItem('mirrage-design-motion', String(motionIntensity)); }, [motionIntensity]);
   useEffect(() => { window.localStorage.setItem('mirrage-design-3d', String(enable3d)); }, [enable3d]);
+  useEffect(() => { window.localStorage.setItem(LOGO_KEY, logoVariantId); }, [logoVariantId]);
+
+  useEffect(() => {
+    const palette = theme === 'light' ? preset.light : preset.dark;
+    const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(createFaviconSvg(logoVariantId, { background: palette.ink, accent: palette.lime, secondary: palette.blue }))}`;
+    const links = document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]');
+    links.forEach((link) => { link.href = href; });
+    document.documentElement.dataset.logo = logoVariantId;
+  }, [logoVariantId, preset, theme]);
 
   const setPreset = useCallback((id: DesignPresetId) => {
     if (!allPresets.some((item) => item.id === id)) return;
@@ -78,8 +94,11 @@ export function DesignProvider({ children }: { children: ReactNode }) {
   const nextPreset = useCallback(() => move(1), [move]);
   const setMotionIntensity = useCallback((value: number) => setMotionIntensityState(Math.max(0, Math.min(1, value))), []);
   const setEnable3d = useCallback((value: boolean) => setEnable3dState(value), []);
+  const setLogoVariant = useCallback((id: LogoVariantId) => {
+    if (logoVariants.some((variant) => variant.id === id)) setLogoVariantId(id);
+  }, []);
   const savePreferred = useCallback(() => window.localStorage.setItem(PREFERRED_KEY, presetId), [presetId]);
-  const resetDesign = useCallback(() => { setPreset('cyberpunk-neon'); setMotionIntensityState(1); setEnable3dState(true); }, [setPreset]);
+  const resetDesign = useCallback(() => { setPreset('cyberpunk-neon'); setMotionIntensityState(1); setEnable3dState(true); setLogoVariantId('signal-core'); }, [setPreset]);
   const saveCustomPreset = useCallback((name: string) => {
     const cleanName = name.trim();
     if (!cleanName) return;
@@ -88,7 +107,7 @@ export function DesignProvider({ children }: { children: ReactNode }) {
     setPreset(custom.id);
   }, [preset, setPreset]);
 
-  const value = useMemo<DesignContextValue>(() => ({ theme, preset, presetId, presets: allPresets, recentPresetIds, favoritePresetIds, motionIntensity, enable3d, setPreset, toggleFavorite, randomize, previousPreset, nextPreset, setMotionIntensity, setEnable3d, savePreferred, resetDesign, saveCustomPreset }), [allPresets, enable3d, favoritePresetIds, motionIntensity, nextPreset, preset, presetId, previousPreset, randomize, recentPresetIds, resetDesign, saveCustomPreset, savePreferred, setEnable3d, setMotionIntensity, setPreset, theme, toggleFavorite]);
+  const value = useMemo<DesignContextValue>(() => ({ theme, preset, presetId, presets: allPresets, recentPresetIds, favoritePresetIds, motionIntensity, enable3d, setPreset, toggleFavorite, randomize, previousPreset, nextPreset, setMotionIntensity, setEnable3d, savePreferred, resetDesign, saveCustomPreset, logoVariant, logoVariants, setLogoVariant }), [allPresets, enable3d, favoritePresetIds, logoVariant, motionIntensity, nextPreset, preset, presetId, previousPreset, randomize, recentPresetIds, resetDesign, saveCustomPreset, savePreferred, setEnable3d, setLogoVariant, setMotionIntensity, setPreset, theme, toggleFavorite]);
   return <DesignContext.Provider value={value}>{children}</DesignContext.Provider>;
 }
 

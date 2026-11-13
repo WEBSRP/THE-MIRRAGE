@@ -41,9 +41,9 @@ export function LoginPage() {
       <form className="auth-form" onSubmit={handleSubmit}>
         {error ? <div className="auth-alert auth-alert-error" role="alert"><Icon name="info" size={16} /><span>{error}</span></div> : null}
         <TextField autoComplete="email" label="Email address" type="email" required
-          onChange={(event) => setEmail(event.target.value)} placeholder="operator@mirrage.me" value={email} />
+          onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" value={email} />
         <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-          Send verification code <Icon name="arrow-right" size={16} />
+          Send verification code <Icon name="send" size={16} />
         </Button>
       </form>
     </div>
