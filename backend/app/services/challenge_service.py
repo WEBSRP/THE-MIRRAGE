@@ -9,6 +9,22 @@ from backend.app.schemas.challenge import ChallengeOut, FlagSubmitResponse
 from backend.app.services.activity_service import activity_service
 
 
+# Public copy is separate from persisted challenge data so older installations
+# also receive spoiler-free descriptions without changing flags or solve records.
+PLAYER_CHALLENGE_TEXT = {
+    "sub-stratum-breach": {
+        "category": "Network",
+        "description": "Enumerate the assigned target and investigate its services to recover the flag.",
+        "hint": "Start with the target address in your Session Console and inspect available services.",
+    },
+    "oasis-evaporation": {
+        "category": "Forensics",
+        "description": "Examine application records and system artifacts to reconstruct the missing evidence.",
+        "hint": "Check timestamps, archived records, and rotated logs.",
+    },
+}
+
+
 class ChallengeService:
     async def seed_default_challenges(self, db: AsyncSession) -> None:
         """Seed foundational MIRRAGE deception & CTF challenges if not present."""
@@ -28,25 +44,16 @@ class ChallengeService:
             {
                 "slug": "sub-stratum-breach",
                 "title": "Sub-Stratum Breach",
-                "category": "Deception",
-                "description": (
-                    "The Mirage container presents a deceptive decoy facade. Identify the secondary "
-                    "internal network pivot leading into the CTF core challenge container."
-                ),
+                **PLAYER_CHALLENGE_TEXT["sub-stratum-breach"],
                 "points": 250,
                 "flag": "MIRRAGE{b3y0nd_th3_d3c0y_c0nt41n3r_82k1}",
-                "hint": "Check internal routing tables and listening sockets on the isolated pod subnet.",
             },
             {
                 "slug": "oasis-evaporation",
                 "title": "The Dried Riverbed",
-                "category": "Forensics",
-                "description": (
-                    "Analyze the memory dump of the honeypot daemon after the perceptual trap is sprung."
-                ),
+                **PLAYER_CHALLENGE_TEXT["oasis-evaporation"],
                 "points": 300,
                 "flag": "MIRRAGE{p4rch3d_34rth_r3v34ls_4ll_491d}",
-                "hint": "The water disappeared for a reason. Look into the log rotation.",
             },
         ]
 
@@ -76,15 +83,16 @@ class ChallengeService:
 
         out = []
         for c in challenges:
+            public_text = PLAYER_CHALLENGE_TEXT.get(c.slug, {})
             out.append(
                 ChallengeOut(
                     id=c.id,
                     slug=c.slug,
                     title=c.title,
-                    category=c.category,
-                    description=c.description,
+                    category=public_text.get("category", c.category),
+                    description=public_text.get("description", c.description),
                     points=c.points,
-                    hint=c.hint,
+                    hint=public_text.get("hint", c.hint),
                     is_solved=c.id in solved_ids,
                 )
             )
@@ -151,7 +159,7 @@ class ChallengeService:
                 )
             return FlagSubmitResponse(
                 is_correct=True,
-                message=f"Congratulations! You solved '{challenge.title}' and pierced the deception.",
+                message=f"Congratulations! You solved '{challenge.title}' .",
                 points_awarded=challenge.points,
                 already_solved=False,
             )

@@ -595,7 +595,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return [
       {
         id: s.session_id || 'session-active',
-        title: challenges[0]?.title || 'Dual-Container Pod (Mirage + CTF)',
+        title: challenges[0]?.title || 'CTF Environment',
         target: `${s.mirage_ip || '10.42.0.x'}:80`,
         category: 'Isolated Lab',
         status: mappedStatus,

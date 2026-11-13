@@ -31,7 +31,7 @@ async def get_slots(
     "/start",
     response_model=SessionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Start machine (Mirage + CTF environment)"
+    summary="Start CTF machine"
 )
 async def start_session(
     request: Optional[SessionStartRequest] = None,
@@ -41,7 +41,7 @@ async def start_session(
     """
     Start the player machine:
     1. Verifies that an active slot is available (max 3 concurrent).
-    2. Provisions an isolated Kubernetes Pod containing Mirage (decoy) and CTF (core).
+    2. Prepares an isolated CTF environment.
     3. Retrieves the Pod IP in the 10.42.0.0/16 subnet.
     4. Returns the Mirage endpoint (10.42.0.x) to the player.
     """

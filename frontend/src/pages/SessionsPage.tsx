@@ -447,7 +447,7 @@ export function SessionsPage() {
       setInitializationDeadline(deadline);
       const remaining = Math.max(0, deadline - Date.now());
       setTimeRemainingMs(remaining > 0 ? remaining : TOTAL_COUNTDOWN_MS);
-      pushToast('Pod initializing', 'Allocating dual-container pod on 10.42.0.0/16 subnet.', 'info');
+      pushToast('Pod initializing', 'Preparing your private CTF environment.', 'info');
     } catch (err: any) {
       setError(err.message || 'Failed to start environment. Cluster may be at capacity.');
       setSessionStatus('failed');
@@ -591,7 +591,7 @@ export function SessionsPage() {
         <div>
           <span className="platform-eyebrow">03 / isolated environments</span>
           <h1>Session Console</h1>
-          <p>Orchestrate your dedicated dual-container pod (Mirage Honeypot + CTF Core) inside the Kubernetes cluster.</p>
+          <p>Start and manage your private CTF machine.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <Button onClick={(e) => handleNavClick(e, '/challenges')} size="small" variant="ghost" icon="terminal">
@@ -628,7 +628,7 @@ export function SessionsPage() {
             Deploy Isolated Machine
           </h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.875rem', lineHeight: 1.6, maxWidth: '440px', margin: '0 auto 1.5rem' }}>
-            Starting an environment allocates a private Kubernetes Pod containing the Mirage decoy honeypot and internal CTF challenge target.
+            Start your environment to receive a target address. Connect through OpenVPN, explore the machine, and capture the flags.
           </p>
 
           <Button

@@ -15,7 +15,7 @@ export function ChallengesPage() {
 
   const categories = useMemo(() => {
     const list = Array.from(new Set(challenges.map((c) => c.category))).filter(Boolean);
-    return list.length ? list : ['Perception', 'Deception', 'Forensics', 'Web', 'Network'];
+    return list.length ? list : ['Web', 'Network', 'Forensics', 'Crypto'];
   }, [challenges]);
 
   const visible = useMemo(() => {
@@ -48,7 +48,7 @@ export function ChallengesPage() {
         <div>
           <span className="platform-eyebrow">02 / target catalog</span>
           <h1>Challenges</h1>
-          <p>Real infrastructure. Dual-container pods with active honeypot deception and hidden CTF targets.</p>
+          <p>Explore hands-on CTF challenges in your private environment.</p>
         </div>
         <div className="challenge-header-stat">
           <strong>{solvedChallengeIds.length.toString().padStart(2, '0')}</strong>
@@ -356,11 +356,11 @@ export function ChallengeDetailPage() {
             </span>
             <div>
               <span className="platform-card-kicker">Environment Pod</span>
-              <h3>Dual-Container Cluster Machine</h3>
+              <h3>CTF Environment</h3>
               <p>
                 {currentMirageIp
                   ? `Active target at ${currentMirageIp} (Port 80/22). Accessible via OpenVPN tunnel.`
-                  : 'Requires an active environment. Launch a pod to generate isolated honeypot and CTF endpoints.'}
+                  : 'Requires an active environment. Start your machine to access the challenge target.'}
               </p>
             </div>
             <Button

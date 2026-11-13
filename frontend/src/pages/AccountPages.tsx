@@ -156,7 +156,7 @@ export function ProfilePage() {
             <span className="platform-card-kicker">Security & Tunnel</span>
             <h3>Cryptographic Certificate Bound</h3>
             <p style={{ marginBottom: '1rem' }}>
-              Your operator session is linked to an isolated OpenVPN keypair. All challenge container interactions, flag submissions, and honeypot events are cryptographically routed through your designated tunnel.
+              Your account has a dedicated OpenVPN profile. Connect through your VPN client to access the assigned challenge environment.
             </p>
             <Button onClick={() => downloadVpnConfig()} size="small" variant="secondary" icon="download">
               Download Active .ovpn Profile
