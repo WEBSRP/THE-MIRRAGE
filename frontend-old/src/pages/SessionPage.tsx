@@ -816,9 +816,9 @@ export function SessionPage() {
 
         <p className="text-sm text-[var(--text-muted)] mb-8 leading-relaxed">
           {sessionStatus === 'ready'
-            ? 'Your isolated honeypot and target container are listening on the challenge subnet.'
+            ? 'Your CTF machine is ready on the challenge network.'
             : sessionStatus === 'initializing'
-            ? 'Provisioning dedicated dual-container pod. Target endpoints will unlock once ready.'
+            ? 'Preparing your CTF machine. The target address will appear once ready.'
             : sessionStatus === 'stopping'
             ? 'Tearing down your environment and releasing resources.'
             : 'Launch your private, isolated training machine inside the MIRRAGE cluster.'}
@@ -842,7 +842,7 @@ export function SessionPage() {
                 Deploy Isolated Environment
               </h2>
               <p className="text-xs text-[var(--text-muted)] mb-6 leading-relaxed">
-                Clicking start allocates a dual-container pod (Mirage Decoy + CTF Target).
+                Clicking start prepares your private CTF machine.
                 Environment initialization takes up to 3 minutes.
               </p>
 

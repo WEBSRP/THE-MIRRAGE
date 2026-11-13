@@ -6,12 +6,12 @@ export function DocsPage() {
     {
       title: 'Getting Started with MIRRAGE',
       content:
-        'MIRRAGE provides isolated cybersecurity environments for hands-on adversarial learning and deception research. Each challenge runs on real infrastructure — no canned simulations, no synthetic sandboxes. Connect via OpenVPN to access the dedicated target network.',
+        'MIRRAGE provides isolated CTF environments for hands-on cybersecurity practice. Each challenge runs on real infrastructure — no canned simulations, no synthetic sandboxes. Connect via OpenVPN to access the dedicated target network.',
       steps: [
         'Sign in or create an account by verifying a one-time code sent to your email.',
         'Navigate to the VPN workspace to download your dedicated OpenVPN (.ovpn) client profile.',
-        'Launch an isolated session pod to provision your private dual-container target machine.',
-        'Investigate listening ports, uncover deception layers, and retrieve the flag.',
+        'Start your private CTF machine from the Session Console.',
+        'Enumerate the target, investigate available services, and retrieve the flags.',
       ],
     },
     {
@@ -26,9 +26,9 @@ export function DocsPage() {
       ],
     },
     {
-      title: 'Dual-Container Architecture & Deception Mechanics',
+      title: 'Working Through a Challenge',
       content:
-        'Every MIRRAGE session spins up an isolated Kubernetes Pod with two containers:\n1. Mirage Decoy (Port 22/80): A deceptive honeypot service pretending to be an authentic server. It logs operator keystrokes, provides misleading clues, and analyzes exploration patterns.\n2. CTF Core Target (Port 2222/internal): The genuine challenge environment hidden behind internal network pivoting and deception markers.',
+        'Start with the target address shown in your Session Console. Enumerate its services, investigate the application, and work toward user and root access. Read recovered files carefully and submit the flags you find.',
     },
     {
       title: 'Session Lifecycle & Inactivity Reapers',
@@ -48,7 +48,7 @@ export function DocsPage() {
         <div>
           <span className="platform-eyebrow">06 / field guide</span>
           <h1>Documentation</h1>
-          <p>Architecture, VPN configuration, deception telemetry, and range guidelines.</p>
+          <p>Getting started, VPN configuration, challenge guidance, and range rules.</p>
         </div>
       </div>
 

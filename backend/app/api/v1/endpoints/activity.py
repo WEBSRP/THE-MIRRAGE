@@ -6,13 +6,13 @@ from backend.app.models.user import User
 from backend.app.schemas.activity import ActivityLogOut
 from backend.app.services.activity_service import activity_service
 
-router = APIRouter(prefix="/activity", tags=["Player Telemetry & Deception Logs"])
+router = APIRouter(prefix="/activity", tags=["Player Activity"])
 
 
 @router.get(
     "/",
     response_model=List[ActivityLogOut],
-    summary="Get player activity and honeypot interaction logs"
+    summary="Get player activity logs"
 )
 async def get_my_activity(
     limit: int = Query(50, ge=1, le=100),
@@ -20,7 +20,7 @@ async def get_my_activity(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Retrieve audit events, session activities, and honeypot triggers for the player."""
+    """Retrieve challenge and session activities for the player."""
     return await activity_service.get_user_activity(
         db=db, user=current_user, limit=limit, offset=offset
     )

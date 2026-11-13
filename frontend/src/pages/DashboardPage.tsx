@@ -27,7 +27,7 @@ export function DashboardPage() {
         <div>
           <span className="platform-eyebrow">Welcome back, {user.username}</span>
           <h1>Stay curious.<br /><em>Look closer.</em></h1>
-          <p>Dual-container Kubernetes targets with deception honeypots. Follow the signal.</p>
+          <p>Your workspace for hands-on CTF challenges.</p>
         </div>
       </header>
 
@@ -145,7 +145,7 @@ export function DashboardPage() {
               isReady={isSessionOnline}
               sessionId={activeSessionData.session_id || 'active'}
               status={activeSessionData.status}
-              title={challenges[0]?.title || 'Dual-Container Machine'}
+              title={challenges[0]?.title || 'CTF Machine'}
             />
           ) : (
             <div className="dashboard-space-empty">
@@ -156,7 +156,7 @@ export function DashboardPage() {
                   </Link>
                 }
                 icon="server"
-                message="Launch a dedicated pod to spin up the honeypot and CTF endpoints."
+                message="Start your CTF machine to access the challenge target."
                 title="No active pod"
               />
             </div>

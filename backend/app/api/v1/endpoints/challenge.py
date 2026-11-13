@@ -10,7 +10,7 @@ from backend.app.schemas.challenge import (
 )
 from backend.app.services.challenge_service import challenge_service
 
-router = APIRouter(prefix="/challenges", tags=["CTF & Deception Challenges"])
+router = APIRouter(prefix="/challenges", tags=["CTF Challenges"])
 
 
 @router.get(
@@ -38,7 +38,7 @@ async def submit_flag(
 ):
     """
     Submit a flag for verification.
-    If correct, awards points and records the deception breakthrough.
+    If correct, awards points and records the challenge solve.
     """
     return await challenge_service.submit_flag(
         db=db,

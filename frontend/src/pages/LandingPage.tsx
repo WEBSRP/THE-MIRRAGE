@@ -64,11 +64,11 @@ export function LandingPage() {
           <div className="landing-range-copy">
             <p className="landing-kicker">The observation layer</p>
             <h2 id="range-title">Less noise.<br /><em>More discovery.</em></h2>
-            <p>Think beyond the checklist. Explore active targets, investigate deceptive telemetry, and build your own mental model of the systems you defend.</p>
+            <p>Think beyond the checklist. Explore active targets, investigate available services, and build your own approach to solving each challenge.</p>
           </div>
           <div className="landing-principles" id="operations">
-            <article><span>01</span><div><h3>A space to experiment.</h3><p>Launch an isolated Kubernetes pod with dual decoy and CTF containers.</p></div></article>
-            <article><span>02</span><div><h3>Follow your curiosity.</h3><p>Capture real flags across Perception, Deception, and Forensics layers.</p></div></article>
+            <article><span>01</span><div><h3>A space to experiment.</h3><p>Launch your private CTF machine and explore at your own pace.</p></div></article>
+            <article><span>02</span><div><h3>Follow your curiosity.</h3><p>Practice reconnaissance, web exploitation, and forensics as you capture flags.</p></div></article>
             <article><span>03</span><div><h3>Keep the whole picture.</h3><p>Stream live OpenVPN network telemetry and cluster session activity in real time.</p></div></article>
           </div>
         </section>
@@ -101,7 +101,7 @@ export function LandingPage() {
 
       <footer className="landing-footer">
         <Wordmark link={false} />
-        <span>MIRRAGE / Cyber Deception & Investigation Range</span>
+        <span>MIRRAGE / Cybersecurity CTF Range</span>
         <a href="#top">Back to top ↑</a>
       </footer>
       <DesignStudio open={studioOpen} onClose={closeStudio} />
