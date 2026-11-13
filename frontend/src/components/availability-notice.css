@@ -19,10 +19,8 @@
 .availability-notice h2 em { color: var(--lime); font-style: normal; }
 .availability-notice p { color: var(--muted-light); font-size: 14px; line-height: 1.8; }
 .availability-notice .availability-notice-example { padding: 14px 16px; border-left: 2px solid var(--lime); background: var(--lime-soft); font-size: 13px; }
-.availability-notice-socials { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 16px; }
-.availability-notice-socials a, .availability-notice-socials span { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 24px; padding: 9px 13px; color: var(--white); font-size: 12px; text-decoration: none; }
+.availability-notice-socials { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0 16px; }
+.availability-notice-socials a { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 1px solid var(--line); border-radius: 14px; color: var(--white); text-decoration: none; }
 .availability-notice-socials a:hover { border-color: var(--lime); color: var(--lime); }
-.availability-notice-socials .availability-notice-unconfigured { color: var(--muted); }
-.availability-notice .availability-notice-contact-note { font-size: 12px; }
 .availability-notice-continue { width: 100%; margin-top: 12px; }
 .availability-notice button:focus-visible, .availability-notice a:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; }
