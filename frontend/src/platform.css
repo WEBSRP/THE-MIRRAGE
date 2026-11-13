@@ -94,3 +94,7 @@
 @media (prefers-reduced-motion: reduce) {
   .platform-shell *, .auth-shell * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* VPN client counts reflect telemetry; radar positions are illustrative. */
+.vpn-radar-client { position: absolute; z-index: 2; width: 8px; height: 8px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 4px var(--lime-soft), 0 0 12px var(--lime); transform: translate(-50%, -50%); pointer-events: none; }
+.vpn-radar-caption { margin: 0 0 12px; text-align: center; color: var(--muted); font: 10px var(--mono); }

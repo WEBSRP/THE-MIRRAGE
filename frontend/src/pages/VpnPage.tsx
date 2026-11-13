@@ -4,6 +4,7 @@ import { Badge, Button, Card, StatusBadge } from '../components/ui';
 import { useApp } from '../state/AppState';
 
 type Platform = 'windows' | 'linux' | 'macos';
+type RadarPoint = { x: number; y: number };
 type Diagnostic = { label: string; detail: string; status: 'idle' | 'running' | 'pass' | 'fail' };
 
 export function VpnPage() {
@@ -23,6 +24,16 @@ export function VpnPage() {
     { label: 'Tunnel interface (tun0)', detail: 'Ready for check', status: 'idle' },
     { label: 'Cluster subnet route (10.42.0.0/16)', detail: 'Ready for check', status: 'idle' },
   ]);
+
+  const [radarPoints, setRadarPoints] = useState<RadarPoint[]>([]);
+  useEffect(() => {
+    const count = Math.max(0, Math.floor(vpnTelemetry?.connected_clients ?? (vpnTelemetry?.is_connected ? 1 : 0)));
+    setRadarPoints(Array.from({ length: count }, () => {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(0.09 + Math.random() * 0.91) * 43;
+      return { x: 50 + Math.cos(angle) * radius, y: 50 + Math.sin(angle) * radius };
+    }));
+  }, [vpnTelemetry]);
 
   const isConnected = Boolean(vpnTelemetry?.is_connected);
   const duration = useDuration(vpnTelemetry?.connected_since ? new Date(vpnTelemetry.connected_since).getTime() : null);
@@ -89,15 +100,20 @@ export function VpnPage() {
             <StatusBadge status={isConnected ? 'Connected' : 'Disconnected'} />
           </div>
 
-          <div className="vpn-radar">
+          <div className="vpn-radar" role="img" aria-label={`${radarPoints.length} connected VPN clients; illustrative positions`}>
             <span className="vpn-radar-ring ring-one" />
             <span className="vpn-radar-ring ring-two" />
             <span className="vpn-radar-ring ring-three" />
             <span className="vpn-radar-sweep" />
+            {radarPoints.map((point, index) => (
+              <span className="vpn-radar-client" key={index} style={{ left: `${point.x}%`, top: `${point.y}%` }} />
+            ))}
             <span className="vpn-radar-core">
               <Icon name="vpn" size={27} />
             </span>
           </div>
+
+          <p className="vpn-radar-caption">{radarPoints.length} connected {radarPoints.length === 1 ? 'client' : 'clients'} · Positions randomized on refresh</p>
 
           <div className="vpn-status-copy">
             {isConnected

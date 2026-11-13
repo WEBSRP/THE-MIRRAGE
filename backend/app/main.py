@@ -76,6 +76,7 @@ if settings.BACKEND_CORS_ORIGINS:
         CORSMiddleware,
         allow_origins=settings.BACKEND_CORS_ORIGINS,
         allow_credentials=True,
+        expose_headers=["Retry-After"],
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
     )

@@ -1,6 +1,7 @@
 import { api } from './api';
 
 export interface VpnStatus {
+  connected_clients?: number;
   is_connected: boolean;
   assigned_ip: string | null;
   bytes_received: number;

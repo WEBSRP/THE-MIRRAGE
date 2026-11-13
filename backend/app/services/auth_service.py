@@ -1,10 +1,12 @@
+import asyncio
+import math
 import hashlib
 import hmac
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.otp import OtpCode
 from backend.app.schemas.otp import OtpTokenResponse
@@ -18,13 +20,23 @@ from backend.app.services.vpn_service import vpn_service
 
 
 class AuthService:
+    def __init__(self):
+        self._otp_request_lock = asyncio.Lock()
+
     async def get_user_by_id(self, db: AsyncSession, user_id: str) -> Optional[User]:
         """Fetch user by ID."""
         query = select(User).where(User.id == user_id)
         result = await db.execute(query)
         return result.scalars().first()
 
-    async def request_otp(self, db: AsyncSession, email: str) -> None:
+    async def request_otp(self, db: AsyncSession, email: str, *, is_resend: bool = False) -> int:
+        async with self._otp_request_lock:
+            if db.bind and db.bind.dialect.name == "postgresql":
+                lock_id = int.from_bytes(hashlib.sha256(email.lower().strip().encode()).digest()[:8], "big", signed=True)
+                await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_id})
+            return await self._issue_otp(db, email, is_resend=is_resend)
+
+    async def _issue_otp(self, db: AsyncSession, email: str, *, is_resend: bool) -> int:
         """Generate and send OTP for the given email."""
         email = email.lower().strip()
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -42,9 +54,22 @@ class AuthService:
             raise MirrageException(
                 status_code=429,
                 detail="Too many OTP requests. Please try again later.",
-                code="OTP_RATE_LIMIT"
+                code="OTP_RATE_LIMIT",
+                headers={"Retry-After": str(max(1, math.ceil((min(row.created_at for row in recent_requests) + timedelta(minutes=settings.OTP_RATE_LIMIT_WINDOW_MINUTES) - now).total_seconds())))},
             )
             
+        # One immediate resend per rate-limit window; all subsequent sends wait.
+        if recent_requests:
+            latest = max(recent_requests, key=lambda row: row.created_at)
+            remaining = math.ceil(settings.OTP_RESEND_COOLDOWN_SECONDS - (now - latest.created_at).total_seconds())
+            immediate_resend = is_resend and len(recent_requests) == 1 and not latest.is_used and latest.expires_at > now
+            if remaining > 0 and not immediate_resend:
+                raise MirrageException(
+                    status_code=429,
+                    detail=f"Please wait {remaining} seconds before requesting a new code.",
+                    code="OTP_COOLDOWN", headers={"Retry-After": str(remaining)},
+                )
+
         # Invalidate any existing unused OTPs
         query = select(OtpCode).where(
             OtpCode.email == email,
@@ -82,6 +107,7 @@ class AuthService:
         
         # Send OTP
         await email_service.send_otp(email, otp)
+        return settings.OTP_RESEND_COOLDOWN_SECONDS if recent_requests or is_resend else 0
 
     async def verify_otp(self, db: AsyncSession, email: str, otp: str) -> OtpTokenResponse:
         """Verify OTP and authenticate/create user."""
@@ -164,26 +190,9 @@ class AuthService:
             user=UserOut.model_validate(user)
         )
 
-    async def resend_otp(self, db: AsyncSession, email: str) -> None:
-        """Resend OTP with cooldown enforcement."""
-        email = email.lower().strip()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        
-        query = select(OtpCode).where(
-            OtpCode.email == email
-        ).order_by(desc(OtpCode.created_at))
-        result = await db.execute(query)
-        last_otp = result.scalars().first()
-        
-        if last_otp:
-            time_since_last = (now - last_otp.created_at).total_seconds()
-            if time_since_last < settings.OTP_RESEND_COOLDOWN_SECONDS:
-                raise MirrageException(
-                    status_code=429,
-                    detail=f"Please wait {int(settings.OTP_RESEND_COOLDOWN_SECONDS - time_since_last)} seconds before requesting a new code.",
-                    code="OTP_COOLDOWN"
-                )
-                
-        await self.request_otp(db, email)
+    async def resend_otp(self, db: AsyncSession, email: str) -> int:
+        """Allow one immediate resend, then enforce the normal cooldown."""
+        return await self.request_otp(db, email, is_resend=True)
+
 
 auth_service = AuthService()

@@ -27,6 +27,7 @@ export function isAuthenticated(): boolean {
 
 export interface OtpResponse {
   message: string;
+  resend_after_seconds: number;
 }
 
 export interface OtpTokenResponse {

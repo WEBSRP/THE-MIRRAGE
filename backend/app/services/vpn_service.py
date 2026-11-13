@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import VpnConfigurationError
@@ -177,6 +178,7 @@ class ProductionVPNService(VPNService):
                 connected_since=profile.connected_since,
                 last_seen_at=profile.last_seen_at,
                 indicator="connected",
+                connected_clients=len(status_data),
             )
         else:
             # Client not currently connected
@@ -192,6 +194,7 @@ class ProductionVPNService(VPNService):
                 connected_since=None,
                 last_seen_at=profile.last_seen_at,
                 indicator="disconnected",
+                connected_clients=len(status_data),
             )
 
     async def get_download_profile(self, db: AsyncSession, user: User) -> VpnDownloadOut:
@@ -318,6 +321,8 @@ class MockVPNService(VPNService):
     async def get_vpn_status(self, db: AsyncSession, user: User) -> VpnStatusOut:
         profile = await self.generate_or_get_profile(db, user)
 
+        count = await db.execute(select(func.count(VpnProfile.id)).where(VpnProfile.is_connected.is_(True), VpnProfile.revoked_at.is_(None)))
+        connected_clients = count.scalar() or 0
         indicator = "connected" if profile.is_connected else "disconnected"
         return VpnStatusOut(
             is_connected=profile.is_connected,
@@ -327,6 +332,7 @@ class MockVPNService(VPNService):
             connected_since=profile.connected_since,
             last_seen_at=profile.last_seen_at,
             indicator=indicator,
+            connected_clients=connected_clients,
         )
 
     async def get_download_profile(self, db: AsyncSession, user: User) -> VpnDownloadOut:

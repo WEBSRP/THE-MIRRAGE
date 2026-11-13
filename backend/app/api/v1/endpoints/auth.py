@@ -38,16 +38,17 @@ async def request_otp_endpoint(
     Send a 6-digit OTP verification code to the given email.
     Response is always generic to prevent email enumeration.
     """
+    resend_after = 60
     try:
-        await auth_service.request_otp(db=db, email=data.email)
+        resend_after = await auth_service.request_otp(db=db, email=data.email)
     except MirrageException as e:
         # Re-raise rate limit errors (these don't reveal email existence)
-        if e.code == "OTP_RATE_LIMIT":
+        if e.code in ("OTP_RATE_LIMIT", "OTP_COOLDOWN"):
             raise
         logger.error("OTP request failed with MirrageException: %s", e.code)
     except Exception:
         logger.exception("OTP request failed unexpectedly")
-    return OtpResponse(message="If this email can receive an OTP, a verification code has been sent.")
+    return OtpResponse(message="If this email can receive an OTP, a verification code has been sent.", resend_after_seconds=resend_after)
 
 
 @router.post(
@@ -89,4 +90,4 @@ async def resend_otp_endpoint(
         logger.error("OTP resend failed with MirrageException: %s", e.code)
     except Exception:
         logger.exception("OTP resend failed unexpectedly")
-    return OtpResponse(message="If this email can receive an OTP, a new verification code has been sent.")
+    return OtpResponse(message="If this email can receive an OTP, a new verification code has been sent.", resend_after_seconds=60)
