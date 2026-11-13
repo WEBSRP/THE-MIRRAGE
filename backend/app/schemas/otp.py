@@ -17,6 +17,7 @@ class OtpResend(BaseModel):
 
 class OtpResponse(BaseModel):
     message: str
+    resend_after_seconds: int = 0
 
 
 class OtpTokenResponse(BaseModel):

@@ -4,6 +4,7 @@ export interface ApiError {
   error: boolean;
   code: string;
   message: string;
+  retryAfterSeconds?: number;
 }
 
 export class ApiClient {
@@ -32,7 +33,7 @@ export class ApiClient {
       if (data) {
         message = data.detail || data.message || `Request failed with status ${res.status}`;
       }
-      throw { error: true, code: res.status.toString(), message } as ApiError;
+      throw { error: true, code: data?.code || res.status.toString(), message, retryAfterSeconds: Number(res.headers.get("Retry-After")) || (res.status === 429 ? 60 : undefined) } as ApiError;
     }
     return res.json();
   }
@@ -49,7 +50,7 @@ export class ApiClient {
       if (data) {
         message = data.detail || data.message || `Request failed with status ${res.status}`;
       }
-      throw { error: true, code: res.status.toString(), message } as ApiError;
+      throw { error: true, code: data?.code || res.status.toString(), message, retryAfterSeconds: Number(res.headers.get("Retry-After")) || (res.status === 429 ? 60 : undefined) } as ApiError;
     }
     return res.json();
   }

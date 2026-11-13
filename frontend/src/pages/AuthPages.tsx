@@ -31,7 +31,7 @@ export function LoginPage() {
       setError(result.message ?? 'Unable to send a verification code.');
       return;
     }
-    navigate('/verify-otp', { state: { email: normalizedEmail, from } });
+    navigate('/verify-otp', { state: { email: normalizedEmail, from, resendAt: Date.now() + (result.retryAfterSeconds ?? 0) * 1000 } });
   };
 
   return (
@@ -59,17 +59,18 @@ export function VerifyOtpPage() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(email ? `Verification code sent to ${email}.` : 'Enter the code sent to your email.');
-  const [countdown, setCountdown] = useState(60);
+  const [resendAt, setResendAt] = useState((location.state as { resendAt?: number } | null)?.resendAt ?? 0);
+  const [countdown, setCountdown] = useState(() => Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)));
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (countdown > 0) {
-      timerRef.current = window.setTimeout(() => setCountdown((c) => c - 1), 1000);
-    }
+    const update = () => setCountdown(Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)));
+    update();
+    timerRef.current = window.setInterval(update, 1000);
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [countdown]);
+  }, [resendAt]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,8 +95,12 @@ export function VerifyOtpPage() {
     const result = await resendOtp(email);
     if (!result.ok) {
       setError(result.message ?? 'Could not resend verification code.');
+      if (result.retryAfterSeconds) setResendAt(Date.now() + result.retryAfterSeconds * 1000);
     } else {
-      setCountdown(60);
+      setCode('');
+      const deadline = Date.now() + (result.retryAfterSeconds ?? 60) * 1000;
+      setResendAt(deadline);
+      navigate('/verify-otp', { replace: true, state: { email, from, resendAt: deadline } });
       setNotice(`A fresh verification code was sent to ${email}.`);
     }
   };
@@ -119,6 +124,14 @@ export function VerifyOtpPage() {
             <span>{notice}</span>
           </div>
         )}
+        <button
+          className="auth-resend"
+          disabled={isAuthLoading || countdown > 0}
+          onClick={resend}
+          type="button"
+        >
+          {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'} <Icon name="refresh" size={13} />
+        </button>
         <TextField
           autoComplete="one-time-code"
           inputMode="numeric"
@@ -132,14 +145,7 @@ export function VerifyOtpPage() {
         <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
           Verify and continue <Icon name="arrow-right" size={16} />
         </Button>
-        <button
-          className="auth-resend"
-          disabled={isAuthLoading || countdown > 0}
-          onClick={resend}
-          type="button"
-        >
-          {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'} <Icon name="refresh" size={13} />
-        </button>
+
       </form>
       <div className="auth-switch">
         <Link to="/login"><Icon name="arrow-left" size={14} /> Back to sign in</Link>

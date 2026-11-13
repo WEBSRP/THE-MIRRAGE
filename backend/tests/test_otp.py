@@ -179,9 +179,9 @@ async def test_new_otp_invalidates_previous(async_client: AsyncClient, db_sessio
     )
     first_otp = mock_send_otp[0]["otp"]
     
-    # Second OTP
+    # The first resend is available immediately.
     await async_client.post(
-        f"{settings.API_V1_STR}/auth/request-otp",
+        f"{settings.API_V1_STR}/auth/resend-otp",
         json={"email": email}
     )
     
@@ -193,20 +193,18 @@ async def test_new_otp_invalidates_previous(async_client: AsyncClient, db_sessio
     assert response.status_code == 401
 
 @pytest.mark.asyncio
-async def test_resend_cooldown_works(async_client: AsyncClient):
+async def test_resend_cooldown_works(async_client: AsyncClient, mock_send_otp):
     email = "cooldown@example.com"
-    
-    await async_client.post(
-        f"{settings.API_V1_STR}/auth/resend-otp",
-        json={"email": email}
-    )
-    
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/resend-otp",
-        json={"email": email}
-    )
+    initial = await async_client.post(f"{settings.API_V1_STR}/auth/request-otp", json={"email": email})
+    assert initial.status_code == 200
+    assert initial.json()["resend_after_seconds"] == 0
+    first = await async_client.post(f"{settings.API_V1_STR}/auth/resend-otp", json={"email": email})
+    assert first.status_code == 200
+    assert first.json()["resend_after_seconds"] == 60
+    response = await async_client.post(f"{settings.API_V1_STR}/auth/resend-otp", json={"email": email})
     assert response.status_code == 429
-    assert "wait" in response.json()["message"].lower()
+    assert 0 < int(response.headers["Retry-After"]) <= 60
+    assert len(mock_send_otp) == 2
 
 @pytest.mark.asyncio
 async def test_resend_rate_limit(async_client: AsyncClient, db_session: AsyncSession):

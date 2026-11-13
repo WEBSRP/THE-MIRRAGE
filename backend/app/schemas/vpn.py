@@ -16,6 +16,7 @@ class VpnProfileOut(BaseModel):
 
 
 class VpnStatusOut(BaseModel):
+    connected_clients: int = 0
     is_connected: bool
     assigned_ip: Optional[str] = None
     bytes_received: int

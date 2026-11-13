@@ -45,7 +45,7 @@ import {
   type ActivityLog,
 } from '../services/activityService';
 
-export type AuthResult = { ok: boolean; message?: string };
+export type AuthResult = { ok: boolean; message?: string; retryAfterSeconds?: number };
 export type ToastTone = 'success' | 'error' | 'info';
 export type Toast = { id: string; title: string; message: string; tone: ToastTone };
 
@@ -369,9 +369,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiRequestOtp(email);
       setPendingOtpEmail(email);
-      return { ok: true, message: res.message || 'Verification code sent to your email.' };
+      return { ok: true, message: res.message || 'Verification code sent to your email.', retryAfterSeconds: res.resend_after_seconds };
     } catch (err: any) {
-      return { ok: false, message: err.message || 'Unable to send verification code.' };
+      return { ok: false, message: err.message || 'Unable to send verification code.', retryAfterSeconds: err.retryAfterSeconds };
     } finally {
       setIsAuthLoading(false);
     }
@@ -406,9 +406,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsAuthLoading(true);
     try {
       const res = await apiResendOtp(email);
-      return { ok: true, message: res.message };
+      return { ok: true, message: res.message, retryAfterSeconds: res.resend_after_seconds };
     } catch (err: any) {
-      return { ok: false, message: err.message || "Unable to resend verification code." };
+      return { ok: false, message: err.message || "Unable to resend verification code.", retryAfterSeconds: err.retryAfterSeconds };
     } finally {
       setIsAuthLoading(false);
     }
