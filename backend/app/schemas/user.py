@@ -1,17 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
-
-
-class UserRegister(BaseModel):
-    email: EmailStr
-    username: str = Field(..., min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
-    password: str = Field(..., min_length=8, max_length=128)
-
-
-class UserLogin(BaseModel):
-    username_or_email: str
-    password: str
+from pydantic import BaseModel, EmailStr
 
 
 class UserOut(BaseModel):

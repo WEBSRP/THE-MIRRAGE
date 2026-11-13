@@ -8,7 +8,7 @@ export function DocsPage() {
       content:
         'MIRRAGE provides isolated cybersecurity environments for hands-on adversarial learning and deception research. Each challenge runs on real infrastructure — no canned simulations, no synthetic sandboxes. Connect via OpenVPN to access the dedicated target network.',
       steps: [
-        'Register or authenticate with your operator credentials or passwordless email OTP.',
+        'Sign in or create an account by verifying a one-time code sent to your email.',
         'Navigate to the VPN workspace to download your dedicated OpenVPN (.ovpn) client profile.',
         'Launch an isolated session pod to provision your private dual-container target machine.',
         'Investigate listening ports, uncover deception layers, and retrieve the flag.',

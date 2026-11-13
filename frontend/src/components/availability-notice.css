@@ -1,0 +1,28 @@
+.availability-notice {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  margin: auto;
+  padding: clamp(24px, 5vw, 40px);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--white);
+  background: var(--panel);
+  box-shadow: 0 28px 100px #0008;
+  font-family: var(--sans);
+}
+.availability-notice::backdrop { background: #03080cba; backdrop-filter: blur(8px); }
+.availability-notice-topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.availability-notice-label { display: inline-flex; align-items: center; gap: 8px; color: var(--lime); font: 11px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+.availability-notice-close { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted-light); cursor: pointer; }
+.availability-notice h2 { margin: 24px 0 18px; font-size: clamp(26px, 6vw, 36px); line-height: 1.2; letter-spacing: -.04em; }
+.availability-notice h2 em { color: var(--lime); font-style: normal; }
+.availability-notice p { color: var(--muted-light); font-size: 14px; line-height: 1.8; }
+.availability-notice .availability-notice-example { padding: 14px 16px; border-left: 2px solid var(--lime); background: var(--lime-soft); font-size: 13px; }
+.availability-notice-socials { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 16px; }
+.availability-notice-socials a, .availability-notice-socials span { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 24px; padding: 9px 13px; color: var(--white); font-size: 12px; text-decoration: none; }
+.availability-notice-socials a:hover { border-color: var(--lime); color: var(--lime); }
+.availability-notice-socials .availability-notice-unconfigured { color: var(--muted); }
+.availability-notice .availability-notice-contact-note { font-size: 12px; }
+.availability-notice-continue { width: 100%; margin-top: 12px; }
+.availability-notice button:focus-visible, .availability-notice a:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; }

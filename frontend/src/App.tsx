@@ -1,9 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ToastViewport } from './components/ui';
+import { AvailabilityNotice } from './components/AvailabilityNotice';
 import { AuthLayout, PlatformLayout } from './layouts/PlatformLayout';
 import { LandingPage } from './pages/LandingPage';
 import { ChallengeDetailPage, ChallengesPage } from './pages/ChallengesPages';
-import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, VerifyOtpPage } from './pages/AuthPages';
+import { LoginPage, VerifyOtpPage } from './pages/AuthPages';
 import { DashboardPage } from './pages/DashboardPage';
 import { VpnPage } from './pages/VpnPage';
 import { SessionsPage } from './pages/SessionsPage';
@@ -85,10 +86,10 @@ export default function App() {
         {/* Auth routes */}
         <Route element={<AuthLayout><PublicAuthRoute><LoginPage /></PublicAuthRoute></AuthLayout>} path="/login" />
         <Route element={<Navigate replace to="/login" />} path="/otp-login" />
-        <Route element={<AuthLayout><PublicAuthRoute><RegisterPage /></PublicAuthRoute></AuthLayout>} path="/register" />
+        <Route element={<Navigate replace to="/login" />} path="/register" />
         <Route element={<AuthLayout><PublicAuthRoute><VerifyOtpPage /></PublicAuthRoute></AuthLayout>} path="/verify-otp" />
-        <Route element={<AuthLayout><PublicAuthRoute><ForgotPasswordPage /></PublicAuthRoute></AuthLayout>} path="/forgot-password" />
-        <Route element={<AuthLayout><PublicAuthRoute><ResetPasswordPage /></PublicAuthRoute></AuthLayout>} path="/reset-password" />
+        <Route element={<Navigate replace to="/login" />} path="/forgot-password" />
+        <Route element={<Navigate replace to="/login" />} path="/reset-password" />
 
         {/* Protected Dashboard and Workspace routes */}
         <Route element={<ProtectedRoute />}>
@@ -109,6 +110,7 @@ export default function App() {
         <Route element={<NotFoundPage />} path="*" />
       </Routes>
       <ToastViewport />
+      <AvailabilityNotice />
     </BrowserRouter>
   );
 }

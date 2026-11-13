@@ -4,87 +4,6 @@ from backend.app.core.config import settings
 
 
 @pytest.mark.asyncio
-async def test_register_success(async_client: AsyncClient):
-    """Test successful user registration and initial VPN profile generation."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/register",
-        json={
-            "email": "archaeologist@mirrage.io",
-            "username": "surveyor_99",
-            "password": "StrongPassword123!",
-        },
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["email"] == "archaeologist@mirrage.io"
-    assert data["username"] == "surveyor_99"
-    assert "id" in data
-    assert "hashed_password" not in data
-
-
-@pytest.mark.asyncio
-async def test_register_duplicate_email(async_client: AsyncClient, test_user):
-    """Test registration failure when email already exists."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/register",
-        json={
-            "email": test_user.email,
-            "username": "another_user",
-            "password": "Password123!",
-        },
-    )
-    assert response.status_code == 400
-    data = response.json()
-    assert "email" in data["message"].lower()
-
-
-@pytest.mark.asyncio
-async def test_register_duplicate_username(async_client: AsyncClient, test_user):
-    """Test registration failure when username already exists."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/register",
-        json={
-            "email": "brand_new@mirrage.io",
-            "username": test_user.username,
-            "password": "Password123!",
-        },
-    )
-    assert response.status_code == 400
-    data = response.json()
-    assert "username" in data["message"].lower()
-
-
-@pytest.mark.asyncio
-async def test_login_success(async_client: AsyncClient, test_user):
-    """Test user login with valid credentials."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={
-            "username_or_email": test_user.username,
-            "password": "CyberSecret2026!",
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    assert data["user"]["username"] == test_user.username
-
-
-@pytest.mark.asyncio
-async def test_login_invalid_password(async_client: AsyncClient, test_user):
-    """Test login failure with wrong password."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={
-            "username_or_email": test_user.username,
-            "password": "WrongPassword!",
-        },
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_get_me(async_client: AsyncClient, auth_headers: dict, test_user):
     """Test retrieving authenticated user profile."""
     response = await async_client.get(
@@ -156,69 +75,26 @@ async def test_jwt_signed_with_different_key_rejected(async_client: AsyncClient,
 
 
 @pytest.mark.asyncio
-async def test_deactivated_account_login_and_token_rejected(
-    async_client: AsyncClient, db_session, test_user
-):
-    """Test that deactivated accounts cannot log in or use existing tokens."""
-    # 1. Login should succeed while active
-    login_resp = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={"username_or_email": test_user.username, "password": "CyberSecret2026!"},
+@pytest.mark.parametrize("environment", ["development", "testing", "production"])
+@pytest.mark.parametrize("path", ["login", "register", "dev-login"])
+async def test_non_otp_auth_unavailable(async_client, monkeypatch, environment, path):
+    monkeypatch.setattr(settings, "ENVIRONMENT", environment)
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/auth/{path}",
+        json={"email": "player@mirrage.io", "username_or_email": "operative_zero",
+              "username": "operative_zero", "password": "CyberSecret2026!"},
     )
-    assert login_resp.status_code == 200
-    token = login_resp.json()["access_token"]
+    assert response.status_code == 404
+    assert "access_token" not in response.json()
 
-    # 2. Deactivate user
+
+@pytest.mark.asyncio
+async def test_deactivated_account_token_rejected(async_client, db_session, test_user):
+    from backend.app.core.security import create_access_token
+    token = create_access_token(subject=test_user.id)
     test_user.is_active = False
     await db_session.commit()
-
-    # 3. Existing token must be rejected
-    me_resp = await async_client.get(
-        f"{settings.API_V1_STR}/auth/me",
-        headers={"Authorization": f"Bearer {token}"},
+    response = await async_client.get(
+        f"{settings.API_V1_STR}/auth/me", headers={"Authorization": f"Bearer {token}"}
     )
-    assert me_resp.status_code == 401
-    assert "disabled" in me_resp.json()["message"].lower() or "deactivated" in me_resp.json()["message"].lower()
-
-    # 4. New login attempt must also be rejected
-    login_resp2 = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={"username_or_email": test_user.username, "password": "CyberSecret2026!"},
-    )
-    assert login_resp2.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_dev_login_fails_closed_in_non_dev(async_client: AsyncClient, monkeypatch):
-    """Test that /dev-login is strictly blocked in testing and production."""
-    # 1. In default test environment ("testing")
-    res_test = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
-    assert res_test.status_code == 403
-    assert res_test.json()["code"] == "DEV_ACCESS_FORBIDDEN"
-
-    # 2. In production environment
-    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    res_prod = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
-    assert res_prod.status_code == 403
-    assert res_prod.json()["code"] == "DEV_ACCESS_FORBIDDEN"
-
-
-@pytest.mark.asyncio
-async def test_dev_login_succeeds_in_development(async_client: AsyncClient, monkeypatch):
-    """Test that /dev-login provisions dev_player and returns valid token in development."""
-    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
-    res = await async_client.post(f"{settings.API_V1_STR}/auth/dev-login")
-    assert res.status_code == 200
-    data = res.json()
-    assert "access_token" in data
-    assert data["user"]["username"] == "dev_player"
-    assert data["user"]["email"] == "dev_player@mirrage.io"
-
-    # Verify authenticated request works with returned token
-    me_res = await async_client.get(
-        f"{settings.API_V1_STR}/auth/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"}
-    )
-    assert me_res.status_code == 200
-    assert me_res.json()["username"] == "dev_player"
-
+    assert response.status_code == 401

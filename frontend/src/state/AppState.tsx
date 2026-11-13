@@ -12,12 +12,10 @@ import {
 } from '../data/mockData';
 import {
   getMe,
-  login as apiLogin,
-  register as apiRegister,
   logout as apiLogout,
   requestOtp as apiRequestOtp,
   verifyOtp as apiVerifyOtp,
-  devLogin as apiDevLogin,
+  resendOtp as apiResendOtp,
   getToken,
   type User as ApiUser,
 } from '../services/authService';
@@ -61,13 +59,10 @@ export type AppContextValue = {
   user: MockUser & Partial<ApiUser>;
   isAuthenticated: boolean;
   isAuthLoading: boolean;
-  login: (identifier: string, password: string) => Promise<AuthResult>;
-  register: (details: { name: string; username: string; email: string; password: string }) => Promise<AuthResult>;
+  resendOtp: (email: string) => Promise<AuthResult>;
   requestOtp: (email: string) => Promise<AuthResult>;
   verifyOtp: (code: string, email?: string) => Promise<AuthResult>;
   logout: () => void;
-  devLogin: () => Promise<AuthResult>;
-  resetPassword: (password: string) => Promise<AuthResult>;
   challenges: ExtendedChallenge[];
   solvedChallengeIds: string[];
   refreshChallenges: () => Promise<void>;
@@ -369,38 +364,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, refreshVpnStatus, refreshSessionStatus]);
 
   // ── AUTH HANDLERS ──
-  const login = useCallback(async (identifier: string, password: string): Promise<AuthResult> => {
-    setIsAuthLoading(true);
-    try {
-      const res = await apiLogin({ username_or_email: identifier, password });
-      setUser(mapApiUserToMockUser(res.user));
-      setIsAuthenticated(true);
-      pushToast('Welcome back', `Signed in as ${res.user.username}`, 'success');
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, message: err.message || 'Invalid username or password.' };
-    } finally {
-      setIsAuthLoading(false);
-    }
-  }, [mapApiUserToMockUser, pushToast]);
-
-  const register = useCallback(async (details: { name: string; username: string; email: string; password: string }): Promise<AuthResult> => {
-    setIsAuthLoading(true);
-    try {
-      await apiRegister({ username: details.username, email: details.email, password: details.password });
-      // After registration, auto-authenticate
-      const res = await apiLogin({ username_or_email: details.username, password: details.password });
-      setUser(mapApiUserToMockUser(res.user));
-      setIsAuthenticated(true);
-      pushToast('Account created', `Welcome to the MIRRAGE range, ${details.username}`, 'success');
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, message: err.message || 'Failed to create operator account.' };
-    } finally {
-      setIsAuthLoading(false);
-    }
-  }, [mapApiUserToMockUser, pushToast]);
-
   const requestOtp = useCallback(async (email: string): Promise<AuthResult> => {
     setIsAuthLoading(true);
     try {
@@ -431,21 +394,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [mapApiUserToMockUser, pendingOtpEmail, pushToast]);
 
-  const devLogin = useCallback(async (): Promise<AuthResult> => {
-    setIsAuthLoading(true);
-    try {
-      const res = await apiDevLogin();
-      setUser(mapApiUserToMockUser(res.user));
-      setIsAuthenticated(true);
-      pushToast('Dev session active', 'Authenticated as development operator', 'info');
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, message: err.message || 'Dev login is unavailable in this environment.' };
-    } finally {
-      setIsAuthLoading(false);
-    }
-  }, [mapApiUserToMockUser, pushToast]);
-
   const logout = useCallback(() => {
     apiLogout();
     setUser(defaultUser);
@@ -454,9 +402,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     pushToast('Signed out', 'Your MIRRAGE session has ended.', 'info');
   }, [pushToast]);
 
-  const resetPassword = useCallback(async (password: string): Promise<AuthResult> => {
-    if (password.length < 8) return { ok: false, message: 'Use at least 8 characters for your password.' };
-    return { ok: true };
+  const resendOtp = useCallback(async (email: string): Promise<AuthResult> => {
+    setIsAuthLoading(true);
+    try {
+      const res = await apiResendOtp(email);
+      return { ok: true, message: res.message };
+    } catch (err: any) {
+      return { ok: false, message: err.message || "Unable to resend verification code." };
+    } finally {
+      setIsAuthLoading(false);
+    }
   }, []);
 
   // ── CTF FLAG SUBMISSION ──
@@ -687,13 +642,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     user,
     isAuthenticated,
     isAuthLoading,
-    login,
-    register,
     requestOtp,
+    resendOtp,
     verifyOtp,
     logout,
-    devLogin,
-    resetPassword,
     challenges,
     solvedChallengeIds,
     refreshChallenges,
@@ -726,13 +678,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     user,
     isAuthenticated,
     isAuthLoading,
-    login,
-    register,
     requestOtp,
+    resendOtp,
     verifyOtp,
     logout,
-    devLogin,
-    resetPassword,
     challenges,
     solvedChallengeIds,
     refreshChallenges,
@@ -777,5 +726,3 @@ export function useTheme() {
   if (!context) throw new Error('useTheme must be used inside ThemeProvider');
   return context;
 }
-
-export const mockCredentials = { email: 'operator@mirrage.me', password: 'Password123!', otp: '424242' };

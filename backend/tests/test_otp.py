@@ -345,23 +345,6 @@ async def test_existing_activity_remains_associated(async_client: AsyncClient, t
     assert len(activities) > 0
 
 @pytest.mark.asyncio
-async def test_existing_password_login_works(async_client: AsyncClient, test_user: User):
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={"username_or_email": test_user.email, "password": "CyberSecret2026!"}
-    )
-    assert response.status_code == 200
-    assert "access_token" in response.json()
-
-@pytest.mark.asyncio
-async def test_existing_register_works(async_client: AsyncClient):
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/register",
-        json={"email": "newreg@example.com", "username": "newreg", "password": "Password123!"}
-    )
-    assert response.status_code == 201
-
-@pytest.mark.asyncio
 async def test_existing_auth_me_works(async_client: AsyncClient, auth_headers: dict):
     response = await async_client.get(
         f"{settings.API_V1_STR}/auth/me",
@@ -561,3 +544,16 @@ async def test_concurrent_otp_verification_no_duplicate_users(async_client: Asyn
     result = await db_session.execute(query)
     users = result.scalars().all()
     assert len(users) == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivated_account_otp_rejected(async_client, db_session, test_user, mock_send_otp):
+    test_user.is_active = False
+    await db_session.commit()
+    await async_client.post(f"{settings.API_V1_STR}/auth/request-otp", json={"email": test_user.email})
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/auth/verify-otp",
+        json={"email": test_user.email, "otp": mock_send_otp[-1]["otp"]},
+    )
+    assert response.status_code == 401
+    assert "access_token" not in response.json()
