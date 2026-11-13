@@ -9,34 +9,6 @@ export interface User {
   created_at: string;
 }
 
-export interface LoginRequest {
-  username_or_email: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  email: string;
-  username: string;
-  password: string;
-}
-
-export interface AuthResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  user: User;
-}
-
-export async function login(data: LoginRequest): Promise<AuthResponse> {
-  const result = await api.post<AuthResponse>('/api/v1/auth/login', data);
-  localStorage.setItem('mirrage-token', result.access_token);
-  return result;
-}
-
-export async function register(data: RegisterRequest): Promise<User> {
-  return api.post<User>('/api/v1/auth/register', data);
-}
-
 export async function getMe(): Promise<User> {
   return api.get<User>('/api/v1/auth/me');
 }

@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from backend.app.core.config import settings
 from backend.app.core.database import Base, get_db
-from backend.app.core.security import hash_password
+from backend.app.core.security import hash_password, create_access_token
 from backend.app.main import app
 from backend.app.models.user import User
 
@@ -96,15 +96,7 @@ async def test_user(db_session: AsyncSession) -> User:
 @pytest_asyncio.fixture
 async def auth_headers(async_client: AsyncClient, test_user: User) -> dict:
     """Authenticate test user and return Bearer auth headers."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={
-            "username_or_email": "operative_zero",
-            "password": "CyberSecret2026!",
-        },
-    )
-    data = response.json()
-    token = data["access_token"]
+    token = create_access_token(subject=test_user.id)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -127,13 +119,5 @@ async def second_user(db_session: AsyncSession) -> User:
 @pytest_asyncio.fixture
 async def second_auth_headers(async_client: AsyncClient, second_user: User) -> dict:
     """Authenticate second user and return Bearer auth headers."""
-    response = await async_client.post(
-        f"{settings.API_V1_STR}/auth/login",
-        json={
-            "username_or_email": "operative_two",
-            "password": "CyberSecret2026!",
-        },
-    )
-    data = response.json()
-    token = data["access_token"]
+    token = create_access_token(subject=second_user.id)
     return {"Authorization": f"Bearer {token}"}

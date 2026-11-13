@@ -44,7 +44,7 @@ Production-grade FastAPI backend for the **MIRRAGE** Cybersecurity CTF & Honeypo
 ## 2. Core Capabilities & Workflows
 
 1. **Player Authentication & Onboarding**:
-   - Secure registration, password hashing (`bcrypt`), and JWT token authentication.
+   - Email OTP verification for sign-in and account creation, with JWT access tokens.
    - Automatic generation of unique OpenVPN client identity and `.ovpn` configuration profiles.
 2. **Dynamic Machine Sandboxing ("Start Machine")**:
    - Slot limit enforcement (max 3 concurrent active sessions).
@@ -145,9 +145,12 @@ All 16 unit and integration tests run against an in-memory async SQLite engine w
 ## 6. API Reference Summary
 
 ### Authentication (`/api/v1/auth`)
-- `POST /register`: Create player account & generate unique VPN profile.
-- `POST /login`: Authenticate and receive JWT Bearer token.
-- `GET /me`: Get authenticated player profile.
+- `POST /request-otp`: Send an email verification code.
+- `POST /verify-otp`: Verify the code and issue a JWT; create an account for a new email.
+- `POST /resend-otp`: Resend with cooldown and rate limiting.
+- `GET /me`: Get the authenticated player profile.
+
+OTP is the only sign-in method. Password login, password registration, and development login routes are removed. Existing users can sign in using their email; existing database password columns are retained for compatibility.
 
 ### Machine & Session Management (`/api/v1/session`)
 - `GET /slots`: Check available sandbox slots (max 3).

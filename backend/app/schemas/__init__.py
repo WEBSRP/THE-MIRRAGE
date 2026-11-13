@@ -1,6 +1,4 @@
 from backend.app.schemas.user import (
-    UserRegister,
-    UserLogin,
     UserOut,
     Token,
     TokenPayload,
@@ -35,8 +33,6 @@ from backend.app.schemas.otp import (
 )
 
 __all__ = [
-    "UserRegister",
-    "UserLogin",
     "UserOut",
     "Token",
     "TokenPayload",

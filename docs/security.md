@@ -81,19 +81,13 @@ The following files contain live cryptographic material, private keys, or infras
 - Neither container is exposed via Nginx, Cloudflare Tunnel, or AWS security group ingress.
 - Access requires both an active OpenVPN connection authenticated with client PKI credentials and valid IP routing into the Kubernetes overlay network.
 
-### Fail-Closed Authentication Guards
+### OTP Authentication
 
-- The development test login route (`POST /api/v1/auth/dev-login`) allows developers to authenticate without credentials during local work.
-- The endpoint implementation in `backend/app/api/v1/endpoints/auth.py` enforces a strict guard:
-  ```python
-  if settings.ENVIRONMENT != "development":
-      raise MirrageException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail="Development access is disabled in this environment.",
-          code="DEV_ACCESS_FORBIDDEN"
-      )
-  ```
-- Any invocation in `production`, `testing`, or unset environments immediately aborts and returns HTTP 403 Forbidden.
+- Email OTP verification is the only way to sign in or create an account.
+- Password login, password registration, and development login routes are unavailable in every environment (HTTP 404).
+- Codes expire, are stored as HMAC hashes, and have attempt limits. Resends enforce cooldown and rate limits.
+- Deactivated accounts cannot obtain tokens through OTP or use existing tokens.
+- Existing database password columns are retained for compatibility but are not used for authentication.
 
 ### Git Exclusion Verification
 

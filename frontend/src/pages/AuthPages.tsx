@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
-import { Button, Card, PasswordField, TextField } from '../components/ui';
+import { Button, TextField } from '../components/ui';
 import { useApp } from '../state/AppState';
 
 function AuthIntro({ eyebrow, title, copy }: { eyebrow: string; title: ReactNode; copy: string }) {
@@ -15,227 +15,43 @@ function AuthIntro({ eyebrow, title, copy }: { eyebrow: string; title: ReactNode
 }
 
 export function LoginPage() {
-  const { login, requestOtp, isAuthLoading } = useApp();
+  const { requestOtp, isAuthLoading } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const [mode, setMode] = useState<'otp' | 'password'>('otp');
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
-    const result = await login(identifier, password);
+    const normalizedEmail = email.trim().toLowerCase();
+    const result = await requestOtp(normalizedEmail);
     if (!result.ok) {
-      setError(result.message ?? 'Unable to sign in.');
+      setError(result.message ?? 'Unable to send a verification code.');
       return;
     }
-    navigate(from, { replace: true });
-  };
-
-  const handleOtp = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!identifier.includes('@')) {
-      setError('Enter your email address first to request a one-time verification code.');
-      return;
-    }
-    setError('');
-    const result = await requestOtp(identifier);
-    if (!result.ok) {
-      setError(result.message ?? 'Unable to send a code.');
-      return;
-    }
-    navigate('/verify-otp', { state: { email: identifier, from } });
-  };
-
-  const switchMode = (nextMode: 'otp' | 'password') => {
-    setMode(nextMode);
-    setError('');
+    navigate('/verify-otp', { state: { email: normalizedEmail, from } });
   };
 
   return (
     <div className="auth-form-wrap">
-      <AuthIntro
-        eyebrow="01 / access"
-        title={<>Welcome back,<br /><em>operator.</em></>}
-        copy={mode === 'otp' ? 'The range is active. Start with a one-time verification code sent to your email.' : 'Sign in with your password, or switch back to passwordless email verification.'}
-      />
-      {mode === 'otp' ? (
-        <form className="auth-form" onSubmit={handleOtp}>
-          {error ? (
-            <div className="auth-alert auth-alert-error">
-              <Icon name="info" size={16} />
-              <span>{error}</span>
-            </div>
-          ) : null}
-          <TextField
-            autoComplete="email"
-            label="Email address"
-            onChange={(event) => setIdentifier(event.target.value)}
-            placeholder="you@example.com"
-            required
-            type="email"
-            value={identifier}
-          />
-          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-            Send verification code <Icon name="send" size={16} />
-          </Button>
-          <div className="auth-form-meta auth-form-meta-centered">
-            <button className="auth-text-button" onClick={() => switchMode('password')} type="button">
-              Use password instead <Icon name="arrow-up-right" size={13} />
-            </button>
-          </div>
-        </form>
-      ) : (
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {error ? (
-            <div className="auth-alert auth-alert-error">
-              <Icon name="info" size={16} />
-              <span>{error}</span>
-            </div>
-          ) : null}
-          <TextField
-            autoComplete="username"
-            label="Email or username"
-            onChange={(event) => setIdentifier(event.target.value)}
-            placeholder="you@example.com"
-            required
-            value={identifier}
-          />
-          <PasswordField
-            autoComplete="current-password"
-            label="Password"
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Enter your password"
-            required
-            value={password}
-          />
-          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-            Enter with password <Icon name="arrow-right" size={16} />
-          </Button>
-          <div className="auth-form-meta auth-form-meta-centered">
-            <button className="auth-text-button" onClick={() => switchMode('otp')} type="button">
-              Use email code instead <Icon name="arrow-up-right" size={13} />
-            </button>
-          </div>
-        </form>
-      )}
-      <div className="auth-switch">
-        New to the range? <Link to="/register">Create an operator account <Icon name="arrow-up-right" size={14} /></Link>
-      </div>
-    </div>
-  );
-}
-
-export function RegisterPage() {
-  const { register, isAuthLoading } = useApp();
-  const navigate = useNavigate();
-  const [details, setDetails] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
-  const [error, setError] = useState('');
-
-  const update = (key: keyof typeof details, value: string) =>
-    setDetails((current) => ({ ...current, [key]: value }));
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    if (details.password.length < 8) {
-      setError('Use at least 8 characters for your password.');
-      return;
-    }
-    if (details.password !== details.confirm) {
-      setError('Password confirmation does not match.');
-      return;
-    }
-    const result = await register(details);
-    if (!result.ok) {
-      setError(result.message ?? 'Unable to create account.');
-      return;
-    }
-    navigate('/dashboard', { replace: true });
-  };
-
-  return (
-    <div className="auth-form-wrap">
-      <AuthIntro
-        eyebrow="02 / registration"
-        title={<>Make your<br /><em>own signal.</em></>}
-        copy="Create an operator profile. Your persistent identity and OpenVPN certificates are initialized upon registration."
-      />
+      <AuthIntro eyebrow="01 / access" title={<>Enter the range,<br /><em>operator.</em></>}
+        copy="Sign in with a one-time code sent to your email. New operators receive an account after verification." />
       <form className="auth-form" onSubmit={handleSubmit}>
-        {error ? (
-          <div className="auth-alert auth-alert-error">
-            <Icon name="info" size={16} />
-            <span>{error}</span>
-          </div>
-        ) : null}
-        <div className="auth-form-grid">
-          <TextField
-            autoComplete="name"
-            label="Full name"
-            onChange={(event) => update('name', event.target.value)}
-            placeholder="Avery Chen"
-            required
-            value={details.name}
-          />
-          <TextField
-            autoComplete="username"
-            label="Username"
-            onChange={(event) => update('username', event.target.value)}
-            placeholder="aetherline"
-            required
-            value={details.username}
-          />
-        </div>
-        <TextField
-          autoComplete="email"
-          label="Email address"
-          onChange={(event) => update('email', event.target.value)}
-          placeholder="you@somewhere.com"
-          required
-          type="email"
-          value={details.email}
-        />
-        <div className="auth-form-grid">
-          <PasswordField
-            autoComplete="new-password"
-            label="Password"
-            onChange={(event) => update('password', event.target.value)}
-            placeholder="8+ characters"
-            required
-            value={details.password}
-          />
-          <PasswordField
-            autoComplete="new-password"
-            label="Confirm password"
-            onChange={(event) => update('confirm', event.target.value)}
-            placeholder="Repeat password"
-            required
-            value={details.confirm}
-          />
-        </div>
-        <label className="ui-checkbox">
-          <input required type="checkbox" />
-          <span className="ui-checkmark">
-            <Icon name="check" size={12} />
-          </span>
-          <span>I understand this is an isolated cybersecurity range.</span>
-        </label>
+        {error ? <div className="auth-alert auth-alert-error" role="alert"><Icon name="info" size={16} /><span>{error}</span></div> : null}
+        <TextField autoComplete="email" label="Email address" type="email" required
+          onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" value={email} />
         <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-          Create operator account <Icon name="arrow-right" size={16} />
+          Send verification code <Icon name="send" size={16} />
         </Button>
       </form>
-      <div className="auth-switch">
-        Already have access? <Link to="/login">Return to sign in <Icon name="arrow-up-right" size={14} /></Link>
-      </div>
     </div>
   );
 }
 
 export function VerifyOtpPage() {
-  const { requestOtp, verifyOtp, isAuthLoading } = useApp();
+  const { resendOtp, verifyOtp, isAuthLoading } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const email = (location.state as { email?: string } | null)?.email ?? '';
@@ -270,10 +86,12 @@ export function VerifyOtpPage() {
     navigate(from, { replace: true });
   };
 
+  if (!email) return <Navigate replace to="/login" />;
+
   const resend = async () => {
     if (countdown > 0 || !email) return;
     setError('');
-    const result = await requestOtp(email);
+    const result = await resendOtp(email);
     if (!result.ok) {
       setError(result.message ?? 'Could not resend verification code.');
     } else {
@@ -323,144 +141,6 @@ export function VerifyOtpPage() {
           {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'} <Icon name="refresh" size={13} />
         </button>
       </form>
-      <div className="auth-switch">
-        <Link to="/login"><Icon name="arrow-left" size={14} /> Back to sign in</Link>
-      </div>
-    </div>
-  );
-}
-
-export function ForgotPasswordPage() {
-  const { requestOtp, isAuthLoading } = useApp();
-  const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    const result = await requestOtp(email);
-    if (!result.ok) {
-      setError(result.message ?? 'Enter a valid email.');
-    } else {
-      setSuccess(true);
-    }
-  };
-
-  return (
-    <div className="auth-form-wrap auth-form-narrow">
-      <AuthIntro
-        eyebrow="04 / recovery"
-        title={<>Passwordless<br /><em>access.</em></>}
-        copy="Request a one-time verification code to sign in directly without needing your password."
-      />
-      {!success ? (
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {error ? (
-            <div className="auth-alert auth-alert-error">
-              <Icon name="info" size={16} />
-              <span>{error}</span>
-            </div>
-          ) : null}
-          <TextField
-            autoComplete="email"
-            label="Account email"
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-            required
-            type="email"
-            value={email}
-          />
-          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-            Send verification code <Icon name="send" size={16} />
-          </Button>
-        </form>
-      ) : (
-        <Card className="auth-success-card">
-          <span className="auth-success-icon"><Icon name="check" size={20} /></span>
-          <h3>Verification code sent.</h3>
-          <p>A 6-digit login code has been dispatched to <strong>{email}</strong>.</p>
-          <Button onClick={() => navigate('/verify-otp', { state: { email } })} variant="primary">
-            Enter code <Icon name="arrow-right" size={15} />
-          </Button>
-        </Card>
-      )}
-      <div className="auth-switch">
-        <Link to="/login"><Icon name="arrow-left" size={14} /> Back to sign in</Link>
-      </div>
-    </div>
-  );
-}
-
-export function ResetPasswordPage() {
-  const { resetPassword, isAuthLoading } = useApp();
-  const navigate = useNavigate();
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    if (password !== confirm) {
-      setError('Passwords do not match.');
-      return;
-    }
-    const result = await resetPassword(password);
-    if (!result.ok) {
-      setError(result.message ?? 'Unable to reset password.');
-    } else {
-      setSuccess(true);
-    }
-  };
-
-  return (
-    <div className="auth-form-wrap auth-form-narrow">
-      <AuthIntro
-        eyebrow="05 / reset"
-        title={<>Set a new<br /><em>passphrase.</em></>}
-        copy="Enter a secure password for your operator account."
-      />
-      {!success ? (
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {error ? (
-            <div className="auth-alert auth-alert-error">
-              <Icon name="info" size={16} />
-              <span>{error}</span>
-            </div>
-          ) : null}
-          <PasswordField
-            autoComplete="new-password"
-            label="New password"
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="8+ characters"
-            required
-            value={password}
-          />
-          <PasswordField
-            autoComplete="new-password"
-            label="Confirm new password"
-            onChange={(event) => setConfirm(event.target.value)}
-            placeholder="Repeat password"
-            required
-            value={confirm}
-          />
-          <Button className="auth-submit" loading={isAuthLoading} size="large" type="submit" variant="primary">
-            Save new password <Icon name="check" size={16} />
-          </Button>
-        </form>
-      ) : (
-        <Card className="auth-success-card">
-          <span className="auth-success-icon"><Icon name="check" size={20} /></span>
-          <h3>Password updated.</h3>
-          <p>Your password has been changed. Use it the next time you sign in.</p>
-          <Button onClick={() => navigate('/login')} variant="primary">
-            Return to sign in <Icon name="arrow-right" size={15} />
-          </Button>
-        </Card>
-      )}
       <div className="auth-switch">
         <Link to="/login"><Icon name="arrow-left" size={14} /> Back to sign in</Link>
       </div>

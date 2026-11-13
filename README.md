@@ -62,7 +62,7 @@ Per-player Pod
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
 | Backend | FastAPI, Python 3.13, SQLAlchemy (async) |
 | Database | Amazon RDS PostgreSQL |
-| Auth | JWT (HS256), bcrypt |
+| Auth | Email OTP, JWT (HS256) |
 | Frontend Hosting | Vercel |
 | API Ingress | Cloudflare Tunnel |
 | Reverse Proxy | Nginx |
@@ -201,7 +201,7 @@ See [docs/security.md](docs/security.md) for the full security model.
 - Cloudflare tunnel tokens
 - Database credentials
 
-Development-only endpoints (`/dev-login`) are disabled in production and fail closed with 403.
+Email OTP is the only authentication method. New accounts are created after email verification. Password login, password registration, and development login endpoints are unavailable.
 
 ---
 

@@ -1,6 +1,6 @@
 # MIRRAGE frontend revamped
 
-Standalone React/Vite frontend for the refreshed public MIRRAGE experience. It intentionally lives beside the existing `frontend/` app and does not import from it.
+React/Vite frontend for the MIRRAGE platform. This is the active application in `frontend/`; the previous interface is retained separately in `frontend-old/`.
 
 ## Run locally
 
@@ -19,13 +19,19 @@ npm run lint
 npm run test:visuals
 ```
 
-Use Node 22.13+ for the visual geometry tests. All account, VPN, session, and challenge actions remain frontend-only simulations.
+Use Node 22.13+ for the visual geometry tests.
 
-## Authentication and workflows
+## Authentication
 
-Authentication uses the configured API service; no development login or credentials are bundled in the frontend. Challenge progress, VPN state, sessions, profile edits, settings, and theme preferences use the app's configured services and browser state where applicable.
+Sign in at `/login` with your email and verify the six-digit OTP sent to your inbox. First-time users receive an account after verification. Authentication, VPN, sessions, and challenges use the backend API. Password and development login are unavailable. Older registration and password recovery URLs redirect to `/login`.
 
-Available routes include `/login`, `/register`, `/verify-otp`, `/forgot-password`, `/reset-password`, `/dashboard`, `/vpn`, `/challenges`, `/challenges/:id`, `/sessions`, `/profile`, and `/settings`.
+## Availability notice
+
+An opening notice explains that this educational project runs on demand and asks players to message their preferred date, time, and time zone. It appears once per browser tab session. Set the public `VITE_CONTACT_*_URL` variables shown in `.env.example` to HTTPS social profile URLs, then rebuild to enable those links. Unconfigured platforms appear as plain tags.
+
+Profile edits and notification preferences currently use browser state; theme and design preferences persist locally. No development login or test credentials are bundled in the frontend.
+
+Available pages include `/login`, `/verify-otp`, `/dashboard`, `/vpn`, `/challenges`, `/challenges/:id`, `/sessions`, `/leaderboard`, `/docs`, `/profile`, and `/settings`. Legacy `/register`, `/forgot-password`, and `/reset-password` URLs redirect to `/login`.
 
 ## Design Studio
 
@@ -51,7 +57,7 @@ The renderer uses procedural 3D coordinates projected onto a transparent Canvas 
 1. Open `/`, rotate and activate the core, then pause and reset it.
 2. Open **Explore Designs**, select a preset, switch light/dark, and reload. The design should persist.
 3. Enable reduced motion or disable 3D in the studio. Automatic motion should stop; node inspection remains usable.
-4. Sign in through the configured authentication flow. Inspect a node in `/dashboard`, zoom, reset, and switch to 2D.
+4. Sign in using an email OTP. Inspect a node in `/dashboard`, zoom, reset, and switch to 2D.
 5. At 320px and desktop widths, check the landing menu, workspace navigation, and scene controls. Changing designs must leave the current account and progress intact.
 
 Chromium checks were run for these interactions, responsive layouts, offscreen/hidden-tab suspension, and canvas fallback. Safari, Firefox, and physical low-powered hardware have not been verified.
