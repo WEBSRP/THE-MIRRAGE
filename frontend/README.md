@@ -27,7 +27,7 @@ Sign in at `/login` with your email and verify the six-digit OTP sent to your in
 
 ## Availability notice
 
-An opening notice explains that this educational project runs on demand and asks players to message their preferred date, time, and time zone. It appears once per browser tab session. Set the public `VITE_CONTACT_*_URL` variables shown in `.env.example` to HTTPS social profile URLs, then rebuild to enable those links. Unconfigured platforms appear as plain tags.
+An opening notice explains that this educational project runs on demand and asks players to message their preferred date, time, and time zone. It appears once per browser tab session. LinkedIn, X, and Instagram logo icons link to the project's contact profiles. The public `VITE_CONTACT_*_URL` variables shown in `.env.example` optionally override those HTTPS profile links at build time.
 
 Profile edits and notification preferences currently use browser state; theme and design preferences persist locally. No development login or test credentials are bundled in the frontend.
 
