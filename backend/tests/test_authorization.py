@@ -146,7 +146,7 @@ async def test_challenge_progress_isolated_between_users(
         headers=auth_headers,
         json={
             "challenge_slug": "first-reflection",
-            "flag": "MIRRAGE{r3fl3ct10n_1s_n0t_r34l1ty_7f9a}",
+            "flag": "MIRRAGE{web_test_flag}",
         },
     )
     assert submit_resp.status_code == 200

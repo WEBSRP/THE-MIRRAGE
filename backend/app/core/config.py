@@ -1,4 +1,7 @@
 import os
+import ipaddress
+import math
+from email_validator import validate_email, EmailNotValidError
 from pathlib import Path
 from typing import List, Union
 from pydantic import AnyHttpUrl, field_validator, ValidationInfo
@@ -98,6 +101,19 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./mirrage.db"
 
+    # Same three shared flags are used by the API and all player targets.
+    # Relative paths resolve from backend/. No plaintext flag values in env vars.
+    CTF_FLAGS_FILE: str = ""
+    FLAG_SUBMISSIONS_PER_WINDOW: int = 10
+    FLAG_SUBMISSION_WINDOW_SECONDS: int = 60
+
+    @field_validator("FLAG_SUBMISSIONS_PER_WINDOW", "FLAG_SUBMISSION_WINDOW_SECONDS")
+    @classmethod
+    def validate_flag_limits(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("Flag submission limits must be positive")
+        return value
+
     # OTP Configuration
     OTP_EXPIRY_MINUTES: int = 10
     OTP_MAX_ATTEMPTS: int = 5
@@ -105,6 +121,29 @@ class Settings(BaseSettings):
     OTP_MAX_REQUESTS_PER_WINDOW: int = 5
     OTP_RATE_LIMIT_WINDOW_MINUTES: int = 30
     OTP_DEV_MODE: bool = False
+    OTP_IP_REQUEST_LIMIT: int = 10
+    OTP_IP_WINDOW_SECONDS: int = 600
+    OTP_EMAIL_HOURLY_LIMIT: int = 100
+    OTP_EMAIL_DAILY_LIMIT: int = 500
+    OTP_IP_BUCKET_RETENTION_SECONDS: int = 86400
+    # Immediate Nginx peers only. No header is trusted by default.
+    OTP_TRUSTED_PROXY_CIDRS: List[str] = []
+
+    @field_validator("OTP_IP_REQUEST_LIMIT", "OTP_IP_WINDOW_SECONDS", "OTP_EMAIL_HOURLY_LIMIT",
+                     "OTP_EMAIL_DAILY_LIMIT", "OTP_IP_BUCKET_RETENTION_SECONDS")
+    @classmethod
+    def validate_otp_abuse_limits(cls, value):
+        if value < 1:
+            raise ValueError("OTP abuse limits must be positive")
+        return value
+
+    @field_validator("OTP_TRUSTED_PROXY_CIDRS")
+    @classmethod
+    def validate_otp_proxy_networks(cls, values):
+        networks = [ipaddress.ip_network(value) for value in values]
+        if any(network.prefixlen == 0 for network in networks):
+            raise ValueError("Wildcard OTP proxy trust is forbidden")
+        return [str(network) for network in networks]
 
     # Email Configuration
     EMAIL_PROVIDER: str = ""
@@ -112,8 +151,44 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = ""
     EMAIL_FROM_NAME: str = "MIRRAGE"
     EMAIL_REPLY_TO: str = ""
-    # Backward-compatible alias for existing code
+    # Legacy field retained for parsing; configure EMAIL_FROM explicitly for dispatch.
     EMAIL_FROM_ADDRESS: str = "noreply@mirrage.io"
+    EMAIL_TIMEOUT_SECONDS: float = 10.0
+    EMAIL_HEALTH_RETENTION_DAYS: int = 7
+
+    @field_validator("EMAIL_TIMEOUT_SECONDS")
+    @classmethod
+    def validate_email_timeout(cls, value):
+        if not math.isfinite(value) or not 0 < value <= 60:
+            raise ValueError("EMAIL_TIMEOUT_SECONDS must be positive and at most 60")
+        return value
+
+    @field_validator("EMAIL_HEALTH_RETENTION_DAYS")
+    @classmethod
+    def validate_email_retention(cls, value):
+        if value < 1:
+            raise ValueError("EMAIL_HEALTH_RETENTION_DAYS must be positive")
+        return value
+
+    def email_configuration_error(self):
+        if self.EMAIL_PROVIDER.strip().lower() not in {"resend", "sendgrid"}:
+            return "EMAIL_PROVIDER_UNSUPPORTED"
+        if (not self.EMAIL_API_KEY or not self.EMAIL_API_KEY.isascii()
+                or any(char.isspace() or not char.isprintable() for char in self.EMAIL_API_KEY)):
+            return "EMAIL_API_KEY_INVALID"
+        for value, code, required in ((self.EMAIL_FROM, "EMAIL_FROM_INVALID", True),
+                                       (self.EMAIL_REPLY_TO, "EMAIL_REPLY_TO_INVALID", False)):
+            if not value and not required:
+                continue
+            try:
+                if not value or any(ord(char) < 32 for char in value):
+                    return code
+                validate_email(value, check_deliverability=False, allow_smtputf8=False)
+            except EmailNotValidError:
+                return code
+        if len(self.EMAIL_FROM_NAME) > 128 or any(ord(char) < 32 for char in self.EMAIL_FROM_NAME):
+            return "EMAIL_FROM_NAME_INVALID"
+        return None
 
     # Session & Slot Management
     MAX_CONCURRENT_SESSIONS: int = 5
@@ -139,6 +214,36 @@ class Settings(BaseSettings):
     OPENVPN_CA_PATH: str = "/etc/openvpn/ca.crt"
     OPENVPN_STATUS_LOG_PATH: str = "/var/log/openvpn/status.log"
     DEFAULT_VPN_SUBNET_PREFIX: str = "10.8.0."
+    VPN_CLIENT_CIDR: str = "10.8.0.0/24"
+    VPN_CLIENT_IP_START: str = "10.8.0.10"
+    VPN_CLIENT_IP_END: str = "10.8.0.250"
+    OPENVPN_CCD_DIR: str = "/var/lib/mirrage/openvpn/ccd"
+    OPENVPN_TUN_INTERFACE: str = "tun0"
+    VPN_CONTROL_HELPER: str = "/usr/local/sbin/mirrage-vpn-control"
+    VPN_PKI_TIMEOUT_SECONDS: int = 45
+    VPN_REVOCATION_RETRY_SECONDS: int = 30
+    VPN_CRL_CHECK_INTERVAL_SECONDS: int = 3600
+    VPN_CRL_REFRESH_MARGIN_SECONDS: int = 7 * 24 * 3600
+
+    @field_validator("VPN_PKI_TIMEOUT_SECONDS", "VPN_REVOCATION_RETRY_SECONDS",
+                     "VPN_CRL_CHECK_INTERVAL_SECONDS", "VPN_CRL_REFRESH_MARGIN_SECONDS")
+    @classmethod
+    def validate_vpn_operation_timing(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("VPN operation timing must be positive")
+        return value
+    SESSION_POD_CIDR: str = "10.42.0.0/16"
+    SESSION_POD_INTERFACE: str = "cni0"
+    K8S_SESSION_NODE_NAME: str = ""
+    SESSION_CALLBACK_PORTS: List[int] = [4444]
+    SESSION_GATEWAY_HELPER: str = "/usr/local/sbin/mirrage-session-access"
+
+    @field_validator("SESSION_CALLBACK_PORTS")
+    @classmethod
+    def validate_callback_ports(cls, value: List[int]) -> List[int]:
+        if any(port < 1 or port > 65535 for port in value):
+            raise ValueError("Callback ports must be between 1 and 65535")
+        return sorted(set(value))
 
     # Easy-RSA / Production VPN Provisioning
     EASYRSA_DIR: str = os.path.expanduser("~/openvpn-ca")
@@ -150,6 +255,8 @@ class Settings(BaseSettings):
     ALLOW_MOCK_IN_PRODUCTION: bool = False
 
     def validate_production_config(self):
+        if self.K8S_MODE == "production" and self.VPN_MODE != "production":
+            raise ValueError("Real player sessions require production VPN reservations")
         if self.ENVIRONMENT == "production":
             if self.K8S_MODE != "production" and not self.ALLOW_MOCK_IN_PRODUCTION:
                 raise ValueError("K8S_MODE must be 'production' in production environment unless ALLOW_MOCK_IN_PRODUCTION is true")
@@ -165,5 +272,9 @@ class Settings(BaseSettings):
             
             if not self.OTP_HMAC_SECRET or len(self.OTP_HMAC_SECRET) < 32 or any(term in self.OTP_HMAC_SECRET.lower() for term in insecure_terms):
                 raise ValueError("OTP_HMAC_SECRET in production must be at least 32 characters long and secure")
+            if error := self.email_configuration_error():
+                raise ValueError(f"Production email configuration is invalid ({error})")
+        if self.K8S_MODE == "production" and not self.K8S_SESSION_NODE_NAME:
+            raise ValueError("K8S_SESSION_NODE_NAME must identify the node running the VPN/gateway guard")
 
 settings = Settings()

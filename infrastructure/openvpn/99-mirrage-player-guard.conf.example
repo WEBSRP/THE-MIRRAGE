@@ -1,0 +1,5 @@
+# /etc/sysctl.d/99-mirrage-player-guard.conf -- IPv4-only single-node k3s gateway.
+# br_netfilter must be loaded before applying these values.
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1

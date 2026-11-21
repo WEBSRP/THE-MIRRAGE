@@ -34,9 +34,9 @@ async def test_challenge_flag_never_leaked_in_api_responses(
     challenges = response.json()
 
     KNOWN_FLAGS = [
-        "MIRRAGE{r3fl3ct10n_1s_n0t_r34l1ty_7f9a}",
-        "MIRRAGE{b3y0nd_th3_d3c0y_c0nt41n3r_82k1}",
-        "MIRRAGE{p4rch3d_34rth_r3v34ls_4ll_491d}",
+        "MIRRAGE{web_test_flag}",
+        "MIRRAGE{user_test_flag}",
+        "MIRRAGE{root_test_flag}",
     ]
 
     for chal in challenges:
@@ -144,7 +144,7 @@ async def test_sql_injection_in_session_id_returns_clean_404(
     assert data["code"] == "ENTITY_NOT_FOUND"
 
 
-def test_settings_loads_backend_env_reliably(monkeypatch):
+def test_settings_loads_backend_env_reliably(monkeypatch, tmp_path):
     """
     Regression test: Settings must resolve backend/.env reliably regardless of current working directory.
     Also verifies that environment variables maintain higher priority than .env values.
@@ -156,20 +156,25 @@ def test_settings_loads_backend_env_reliably(monkeypatch):
     # Verify default env file points to backend/.env
     assert Path(DEFAULT_ENV_FILE).name == ".env"
     assert Path(DEFAULT_ENV_FILE).parent.name == "backend"
-    assert Path(DEFAULT_ENV_FILE).exists()
+    assert Path(DEFAULT_ENV_FILE).is_absolute()
+
+    # Do not depend on or read an operator's real EC2 credentials in this test.
+    fixture_env = tmp_path / ".env"
+    fixture_env.write_text("SECRET_KEY=local-only-configuration-fixture-1234567890\nPROJECT_NAME=MIRRAGE API\n")
+    monkeypatch.chdir(tmp_path)
 
     # Clear SECRET_KEY from os.environ to test loading directly from backend/.env
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.setenv("ENVIRONMENT", "development")
 
-    loaded_settings = Settings()
+    loaded_settings = Settings(_env_file=fixture_env)
     assert loaded_settings.SECRET_KEY is not None
     assert len(loaded_settings.SECRET_KEY) >= 32
     assert loaded_settings.PROJECT_NAME == "MIRRAGE API"
 
     # Verify env var override takes precedence over .env file
     monkeypatch.setenv("PROJECT_NAME", "Overridden API Name")
-    override_settings = Settings()
+    override_settings = Settings(_env_file=fixture_env)
     assert override_settings.PROJECT_NAME == "Overridden API Name"
 
 

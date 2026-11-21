@@ -1,15 +1,19 @@
 [Unit]
 Description=MIRRAGE FastAPI Backend
 After=network.target
+Requires=mirrage-player-guard.service
+After=mirrage-player-guard.service
 
 [Service]
+# Apply/review database migrations during maintenance before starting this unit.
+# See docs/database-migrations.md; startup only verifies the recorded revision.
 Type=simple
 User=admin
 Group=admin
 WorkingDirectory=/home/admin/THE-MIRRAGE
 Environment="PYTHONPATH=/home/admin/THE-MIRRAGE"
 Environment="PATH=/home/admin/THE-MIRRAGE/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/admin/THE-MIRRAGE/backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/admin/THE-MIRRAGE/backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 Restart=on-failure
 RestartSec=5
 

@@ -14,10 +14,10 @@ import { DocsPage } from './pages/DocsPage';
 import { useApp } from './state/AppState';
 
 function ProtectedRoute() {
-  const { isAuthenticated, isAuthLoading } = useApp();
+  const { isAuthenticated, isAuthInitializing } = useApp();
   const location = useLocation();
 
-  if (isAuthLoading) {
+  if (isAuthInitializing) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
         <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Verifying operator credentials...</p>
@@ -29,9 +29,11 @@ function ProtectedRoute() {
 }
 
 function PublicAuthRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isAuthLoading } = useApp();
+  const { isAuthenticated, isAuthInitializing } = useApp();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
-  if (isAuthLoading) {
+  if (isAuthInitializing) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
         <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Loading...</p>
@@ -39,7 +41,7 @@ function PublicAuthRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return isAuthenticated ? <Navigate replace to="/dashboard" /> : <>{children}</>;
+  return isAuthenticated ? <Navigate replace to={from} /> : <>{children}</>;
 }
 
 function PassagePage() {

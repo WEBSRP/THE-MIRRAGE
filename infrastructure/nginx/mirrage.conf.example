@@ -1,8 +1,18 @@
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
+    # cloudflared runs on this host. Never expose this trusted origin publicly.
+    listen 127.0.0.1:80 default_server;
+    listen [::1]:80 default_server;
 
     server_name _;
+    set_real_ip_from 127.0.0.1;
+    set_real_ip_from ::1;
+    real_ip_header CF-Connecting-IP;
+    real_ip_recursive off;
+    # Fail closed if the tunnel did not provide a usable visitor identity.
+    if ($http_cf_connecting_ip = "") { return 400; }
+    if ($http_cf_connecting_ip ~ "[,/%]") { return 400; }
+    if ($remote_addr = 127.0.0.1) { return 400; }
+    if ($remote_addr = ::1) { return 400; }
 
     # Reverse proxy to FastAPI backend
     location / {
@@ -12,7 +22,11 @@ server {
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Overwrite caller input; the backend trusts only this normalized header
+        # from its explicitly configured immediate Nginx peer.
+        proxy_set_header X-Mirrage-Client-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header CF-Connecting-IP "";
         proxy_set_header X-Forwarded-Proto $scheme;
 
         # WebSocket support (if needed later)

@@ -1,0 +1,5 @@
+{
+  "web": "MIRRAGE{web_test_flag}",
+  "user": "MIRRAGE{user_test_flag}",
+  "root": "MIRRAGE{root_test_flag}"
+}

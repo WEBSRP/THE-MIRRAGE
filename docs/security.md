@@ -48,10 +48,10 @@ The following files contain live cryptographic material, private keys, or infras
 
 - The Easy-RSA CA private key (`~/openvpn-ca/pki/private/ca.key`) is encrypted on disk with a strong passphrase.
 - The backend production provisioning system (`backend/app/services/vpn_provisioner.py`) reads the passphrase from `/etc/mirrage/vpn-ca-passphrase` (restricted permissions: `root:admin 640`).
-- Passphrases are passed non-interactively via the `EASYRSA_PASSIN` environment variable directly to the subprocess (`shell=False`, explicit arg list) and cleared from memory immediately upon subprocess completion.
+- Passphrases are passed non-interactively via the `EASYRSA_PASSIN` environment variable directly to the subprocess (`shell=False`, explicit arg list) and removed from the temporary environment mapping after subprocess completion; Python does not guarantee memory erasure.
 - Passphrases are NEVER passed via command-line arguments (which would be visible in `ps`/process tables) and NEVER written to logs, database records, API responses, or generated `.ovpn` files.
-- All subprocess errors are passed through `_sanitize_error()` to strip any potential passphrase or private key references before raising exceptions.
-- Certificate revocation is managed via Easy-RSA `revoke` and `gen-crl`, updating `pki/index.txt` and generating updated CRLs (`pki/crl.pem`).
+- PKI subprocess output is withheld from exceptions and responses; failures expose generic messages.
+- Targeted administrator revocation commits a durable deny, closes sessions, uses Easy-RSA `revoke`/`gen-crl`, publishes a validated CRL through a narrow root helper, and disconnects the selected client. Retry and CRL expiry maintenance are durable. See [VPN revocation](vpn-revocation.md) for the source implementation, installation requirements and pending live acceptance checks.
 
 ### Secret Key Complexity Enforcement
 
@@ -69,11 +69,25 @@ The following files contain live cryptographic material, private keys, or infras
 
 ### Pod Isolation and NetworkPolicy Enforcement
 
-- Sandboxes are segregated inside the dedicated `mirrage-sessions` Kubernetes namespace.
-- A strict `NetworkPolicy` (`infrastructure/kubernetes/network-policy.yaml`) isolates player pods:
-  - **Ingress**: Only packets originating from the OpenVPN CIDR (`10.8.0.0/24`) destined for TCP port 22 (Mirage Honeypot) or TCP port 2222 (CTF Challenge) are accepted. All inter-pod communication and traffic from the host network are blocked.
-  - **Egress**: Pod outbound connections are restricted solely to established sessions on `10.8.0.0/24` and DNS lookup via internal nameservers on port 53. Pods cannot pivot into host networks, cloud metadata endpoints (`169.254.169.254`), or the internet.
-- Pod security contexts explicitly drop `ALL` Linux capabilities and disable privilege escalation (`allowPrivilegeEscalation: false`).
+See [player-isolation.md](player-isolation.md) for the implementation, required
+maintenance rollout, privileges and release acceptance tests. This is an IPv4,
+single-node design; templates alone do not prove that the live server enforces it.
+
+- OpenVPN binds each authenticated certificate to a reserved address through CCDs
+  and a learn-address hook. There is no dynamic pool or direct client-to-client path.
+- A namespace default-deny policy is supplemented by one owner `/32` session policy
+  permitting TCP 22 (CTF SSH), 80 (CTF web), and 2222 (Mirage SSH).
+- Pod-initiated connections are allowed only to the owner's configured callback
+  ports (default TCP 4444). DNS and internet egress are denied by default.
+- A separate root-owned gateway guard enforces expiring VPN/pod address pairs,
+  protects host services, denies peer access and blocks IPv6 from the player/pod
+  interfaces. Correct routing, bridge filtering and CNI enforcement must be tested.
+- Target containers drop all capabilities and add back the limited set required
+  by SSH/cron and the intended exercise, including SETUID/SETGID and DAC_OVERRIDE.
+  They run root services and intentionally permit an in-container root solve;
+  seccomp, disabled privilege escalation and absent service-account tokens remain.
+- Revocation precedes pod deletion/IP release; failed cleanup retains a slot and
+  is retried. Kubernetes policies do not by themselves protect node-local services.
 
 ### Public Exposure Avoidance for CTF Environments
 
@@ -86,7 +100,10 @@ The following files contain live cryptographic material, private keys, or infras
 - Email OTP verification is the only way to sign in or create an account.
 - Password login, password registration, and development login routes are unavailable in every environment (HTTP 404).
 - Codes expire, are stored as HMAC hashes, and have attempt limits. Resends enforce cooldown and rate limits.
+- Issuance, resends and verification share a database lock for the normalized email. Conditional SQL updates enforce single consumption and bounded attempt counting across workers. See [OTP atomicity](otp-atomicity.md) for validation, rollout requirements and remaining abuse controls.
+- Database-backed IP request limits and global hourly/daily issuance budgets apply across workers. Proxy identity is accepted only from explicitly trusted immediate peers; see [OTP abuse controls](otp-abuse-controls.md) for required proxy configuration and pending live acceptance.
 - Deactivated accounts cannot obtain tokens through OTP or use existing tokens.
+- Production validates supported email configuration; provider failures/timeouts produce generic 503s. Admin-only acceptance health contains no recipients, OTPs or provider bodies. See [email readiness](email-readiness.md) for limits and pending inbox acceptance.
 - Existing database password columns are retained for compatibility but are not used for authentication.
 
 ### Git Exclusion Verification

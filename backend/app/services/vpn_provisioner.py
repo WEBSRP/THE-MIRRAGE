@@ -7,6 +7,11 @@ in logs, exceptions, CLI arguments, or API responses.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
+import fcntl
+from functools import wraps
+import signal
+import time
 import logging
 import os
 import re
@@ -18,7 +23,7 @@ from backend.app.core.config import settings
 logger = logging.getLogger("mirrage.vpn.provisioner")
 
 # Restrict characters in client names to prevent command injection
-_CLIENT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_CLIENT_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
 
 class VPNProvisionerError(Exception):
@@ -96,76 +101,83 @@ def _client_cert_exists(client_name: str) -> bool:
     return cert_path.exists()
 
 
-async def create_client_certificate(client_name: str) -> None:
-    """Create a client certificate using Easy-RSA.
+@asynccontextmanager
+async def pki_lock():
+    directory, _ = _get_easyrsa_paths()
+    fd = os.open(directory / ".mirrage-pki.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        deadline = time.monotonic() + settings.VPN_PKI_TIMEOUT_SECONDS
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise VPNProvisionerError("PKI operation is busy")
+                await asyncio.sleep(0.1)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
-    The CA passphrase is passed via EASYRSA_PASSIN environment variable
-    (not via command-line arguments, which would be visible in process tables).
 
-    If the certificate already exists, this is a no-op.
+def serialized_pki(function):
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        async with pki_lock():
+            return await function(*args, **kwargs)
+    return wrapped
 
-    Args:
-        client_name: Safe client identifier (validated format)
 
-    Raises:
-        VPNProvisionerError: If certificate generation fails
-    """
-    client_name = _validate_client_name(client_name)
-
-    # Check if certificate already exists
-    if _client_cert_exists(client_name):
-        logger.info("Client certificate already exists for: %s", client_name)
-        return
-
-    easyrsa_dir, easyrsa_bin = _get_easyrsa_paths()
-
-    # Read passphrase from protected file
-    ca_passphrase = _read_ca_passphrase()
-
-    # Build command — shell=False with explicit arg list
-    command = [
-        str(easyrsa_bin),
-        "build-client-full",
-        client_name,
-        "nopass",  # Client key is NOT password-protected (inline in .ovpn)
-    ]
-
-    # Environment — passphrase via env var, not CLI args
+async def _run_easyrsa(*arguments) -> None:
+    directory, binary = _get_easyrsa_paths()
     env = os.environ.copy()
     env["EASYRSA_BATCH"] = "1"
-    env["EASYRSA_PASSIN"] = f"pass:{ca_passphrase}"
-
+    env["EASYRSA_PASSIN"] = "pass:" + _read_ca_passphrase()
+    process = None
     try:
-        # Run in thread pool to avoid blocking the event loop
         process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=str(easyrsa_dir),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            str(binary), *arguments, cwd=str(directory), env=env, start_new_session=True,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-
-        stdout, stderr = await process.communicate()
-
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=settings.VPN_PKI_TIMEOUT_SECONDS)
+        except (asyncio.TimeoutError, asyncio.CancelledError) as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            await process.communicate()
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise VPNProvisionerError("PKI operation interrupted or timed out") from None
+        if process.returncode:
+            # Never surface subprocess output: it can include private paths/values.
+            raise VPNProvisionerError("PKI operation failed")
     finally:
-        # Clear passphrase from local scope immediately
-        ca_passphrase = None  # noqa: F841
         env.pop("EASYRSA_PASSIN", None)
 
-    if process.returncode != 0:
-        # SECURITY: Filter error output to remove any passphrase references
-        error_text = stderr.decode(errors="replace").strip()
-        if not error_text:
-            error_text = stdout.decode(errors="replace").strip()
 
-        # Sanitize — never include passphrase-related content in errors
-        sanitized = _sanitize_error(error_text)
-        logger.error("Easy-RSA certificate generation failed for client: %s", client_name)
-        raise VPNProvisionerError(
-            f"Certificate generation failed for {client_name}: {sanitized}"
-        )
+@serialized_pki
+async def create_client_certificate(client_name: str) -> None:
+    client_name = _validate_client_name(client_name)
+    if _certificate_revoked_in_index(client_name):
+        raise VPNProvisionerError("Certificate is revoked; explicit reissuance is required")
+    if _client_cert_exists(client_name):
+        return
+    await _run_easyrsa("build-client-full", client_name, "nopass")
 
-    logger.info("Client certificate created for: %s", client_name)
+
+def _certificate_revoked_in_index(client_name: str) -> bool:
+    index = Path(settings.EASYRSA_DIR).expanduser() / "pki" / "index.txt"
+    if not index.exists():
+        return False
+    for line in index.read_text().splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 6 and fields[0] == "R":
+            if re.search(r"(?:^|/)CN=" + re.escape(client_name) + r"(?:/|$)", fields[5]):
+                return True
+    return False
 
 
 def build_ovpn_profile(client_name: str) -> str:
@@ -253,90 +265,23 @@ verb 3
     return ovpn
 
 
+@serialized_pki
 async def revoke_client_certificate(client_name: str) -> None:
-    """Revoke a client certificate using Easy-RSA and regenerate the CRL.
-
-    Args:
-        client_name: The client identity to revoke
-
-    Raises:
-        VPNProvisionerError: If revocation fails
-    """
+    """Revoke idempotently and generate a fresh CRL; publishing is a verified root operation."""
     client_name = _validate_client_name(client_name)
+    if not _certificate_revoked_in_index(client_name):
+        # Missing files/certificates must fail, never masquerade as successful revocation.
+        await _run_easyrsa("revoke", client_name)
+    await _run_easyrsa("gen-crl")
+    if not (Path(settings.EASYRSA_DIR).expanduser() / "pki" / "crl.pem").is_file():
+        raise VPNProvisionerError("PKI did not produce a CRL")
 
-    if not _client_cert_exists(client_name):
-        logger.warning("Cannot revoke — certificate does not exist: %s", client_name)
-        return
 
-    easyrsa_dir, easyrsa_bin = _get_easyrsa_paths()
-    ca_passphrase = _read_ca_passphrase()
-
-    env = os.environ.copy()
-    env["EASYRSA_BATCH"] = "1"
-    env["EASYRSA_PASSIN"] = f"pass:{ca_passphrase}"
-
-    try:
-        # Step 1: Revoke the certificate
-        revoke_command = [
-            str(easyrsa_bin),
-            "revoke",
-            client_name,
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *revoke_command,
-            cwd=str(easyrsa_dir),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            error_text = stderr.decode(errors="replace").strip()
-            if not error_text:
-                error_text = stdout.decode(errors="replace").strip()
-            sanitized = _sanitize_error(error_text)
-            # Check if already revoked
-            if "already revoked" in error_text.lower() or "already been revoked" in error_text.lower():
-                logger.info("Certificate already revoked: %s", client_name)
-            else:
-                raise VPNProvisionerError(
-                    f"Certificate revocation failed for {client_name}: {sanitized}"
-                )
-
-        # Step 2: Regenerate CRL
-        crl_command = [
-            str(easyrsa_bin),
-            "gen-crl",
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *crl_command,
-            cwd=str(easyrsa_dir),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            error_text = stderr.decode(errors="replace").strip()
-            sanitized = _sanitize_error(error_text)
-            raise VPNProvisionerError(
-                f"CRL generation failed: {sanitized}"
-            )
-
-        # Step 3: Copy CRL to OpenVPN server directory
-        crl_source = Path(settings.EASYRSA_DIR).expanduser() / "pki" / "crl.pem"
-        if crl_source.exists():
-            logger.info("CRL regenerated. Copy to OpenVPN server directory if needed.")
-
-    finally:
-        ca_passphrase = None  # noqa: F841
-        env.pop("EASYRSA_PASSIN", None)
-
-    logger.info("Client certificate revoked: %s", client_name)
+@serialized_pki
+async def refresh_certificate_revocation_list() -> None:
+    await _run_easyrsa("gen-crl")
+    if not (Path(settings.EASYRSA_DIR).expanduser() / "pki" / "crl.pem").is_file():
+        raise VPNProvisionerError("PKI did not produce a CRL")
 
 
 def generate_client_name(user_id: str) -> str:

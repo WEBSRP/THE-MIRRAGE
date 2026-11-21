@@ -1,0 +1,9 @@
+# Install using visudo -f /etc/sudoers.d/mirrage-player-guard, root:root 0440.
+# Replace admin with the backend service user if different. No shell/wildcard path.
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access check
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access inventory
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access status --session *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access grant --session *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access renew --session *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access revoke --session *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-session-access forget --session *

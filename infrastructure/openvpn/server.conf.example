@@ -4,7 +4,8 @@
 
 port 1194
 proto udp
-dev tun
+dev tun0
+disable-dco
 
 # SSL/TLS Root Certificate & Keys
 ca /etc/openvpn/server/ca.crt
@@ -13,23 +14,37 @@ key /etc/openvpn/server/server.key
 dh /etc/openvpn/server/dh.pem
 
 # VPN Subnet allocated for players
-server 10.8.0.0 255.255.255.0
+topology subnet
+server 10.8.0.0 255.255.255.0 nopool
+client-config-dir /var/lib/mirrage/openvpn/ccd
+ccd-exclusive
+script-security 2
+learn-address "/usr/bin/python3 /usr/local/lib/mirrage/learn_address.py"
+max-routes-per-client 1
+# Do NOT enable client-to-client or duplicate-cn. All clients traverse tun0/guard.
 
 # Route Kubernetes sandbox pod CIDR to players
 push "route 10.42.0.0 255.255.0.0"
 
-# Maintain IP associations
-ifconfig-pool-persist /var/log/openvpn/ipp.txt
+# Addresses are reserved in the database and pinned to certificate CNs in CCDs.
+# A dynamic pool or ifconfig-pool-persist is not an ownership/security boundary.
 
 # Security & Ciphers
 cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+tls-crypt /etc/openvpn/server/ta.key
+crl-verify /etc/openvpn/server/crl.pem
+# Protected local control socket for selected-client disconnection, never TCP.
+management /run/openvpn/server.mgmt unix
+management-client-user root
+management-client-group root
 auth SHA256
 keepalive 10 120
 persist-key
 persist-tun
 
 # Logging and live status log (parsed by FastAPI vpn_service)
-status /var/log/openvpn/openvpn-status.log 5
+status /var/log/openvpn/status.log 5
 status-version 2
 log-append /var/log/openvpn/openvpn.log
 verb 3

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import ipaddress
 import logging
 from abc import ABC, abstractmethod
@@ -7,13 +8,14 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from backend.app.core.config import settings
 from backend.app.core.exceptions import VpnConfigurationError
 from backend.app.models.user import User
 from backend.app.models.vpn import VpnProfile
 from backend.app.schemas.vpn import VpnStatusOut, VpnDownloadOut
+from backend.app.services.vpn_access import require_vpn_access
 
 logger = logging.getLogger("mirrage.vpn.service")
 
@@ -47,83 +49,57 @@ class ProductionVPNService(VPNService):
     - One profile per user (idempotent)
     """
 
+    def __init__(self):
+        self._profile_lock = asyncio.Lock()
+
     async def generate_or_get_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> VpnProfile:
-        """Generate or retrieve the user's VPN profile.
-
-        Idempotent: if a non-revoked profile exists, return it.
-        Otherwise, generate a new client certificate and .ovpn profile.
-        """
+        from backend.app.services.vpn_access import reserve_address, write_client_config
         from backend.app.services.vpn_provisioner import (
-            create_client_certificate,
-            build_ovpn_profile,
-            generate_client_name,
-            VPNProvisionerError,
+            create_client_certificate, build_ovpn_profile, generate_client_name, VPNProvisionerError,
         )
-
-        # Check for existing non-revoked profile
-        result = await db.execute(
-            select(VpnProfile).where(
-                VpnProfile.user_id == user.id,
-                VpnProfile.revoked_at.is_(None),
-            )
-        )
-        profile = result.scalars().first()
-
-        if profile:
-            # If the profile was created as a mock profile in development, upgrade it to production
-            if profile.client_name.startswith("mock-"):
-                client_name = generate_client_name(user.id)
-                try:
+        async with self._profile_lock:
+            await require_vpn_access(db, user.id)
+            prior = (await db.execute(select(VpnProfile).where(
+                VpnProfile.user_id == user.id
+            ))).scalars().first()
+            if prior and prior.revoked_at is not None:
+                raise VpnConfigurationError("VPN profile is revoked; contact an administrator")
+            client_name = (prior.client_name if prior and not prior.client_name.startswith("mock-")
+                           else generate_client_name(user.id))
+            address = await reserve_address(db, user.id, client_name)
+            if db.bind.dialect.name == "postgresql":
+                # Easy-RSA updates one shared PKI index; serialize across API workers.
+                await db.execute(text("SELECT pg_advisory_xact_lock(74291825)"))
+            await require_vpn_access(db, user.id, lock=True)
+            profile = (await db.execute(select(VpnProfile).where(
+                VpnProfile.user_id == user.id
+            ).with_for_update().execution_options(populate_existing=True))).scalars().first()
+            if profile and profile.revoked_at is not None:
+                raise VpnConfigurationError("VPN profile is revoked; contact an administrator")
+            try:
+                if profile is None or profile.client_name.startswith("mock-"):
                     await create_client_certificate(client_name)
                     config_data = build_ovpn_profile(client_name)
-                    profile.client_name = client_name
-                    profile.config_data = config_data
-                    profile.assigned_ip = None
-                    profile.is_connected = False
-                    await db.commit()
-                    await db.refresh(profile)
-                    logger.info("Upgraded legacy mock VPN profile to production for user %s (%s)", user.id, client_name)
-                    return profile
-                except VPNProvisionerError as e:
-                    logger.error("Failed to upgrade legacy mock VPN profile for user %s: %s", user.id, str(e))
-                    raise VpnConfigurationError(
-                        detail="Failed to generate VPN profile. Please try again or contact support."
-                    )
+                    if profile is None:
+                        profile = VpnProfile(user_id=user.id, client_name=client_name,
+                                             config_data=config_data, is_connected=False)
+                        db.add(profile)
+                    else:
+                        profile.client_name = client_name
+                        profile.config_data = config_data
+                        profile.is_connected = False
+                if profile.client_name != client_name:
+                    raise VpnConfigurationError("VPN certificate identity mismatch")
+                await asyncio.to_thread(write_client_config, client_name, address)
+            except (VPNProvisionerError, OSError, ValueError):
+                logger.error("Cannot provision private VPN configuration for user %s", user.id)
+                raise VpnConfigurationError("Cannot provision VPN address/configuration") from None
+            if profile.assigned_ip != address:
+                profile.is_connected = False
+            profile.assigned_ip = address
+            await db.commit()
+            await db.refresh(profile)
             return profile
-
-        # Generate client name from user ID
-        client_name = generate_client_name(user.id)
-
-        try:
-            # Create certificate (idempotent — no-op if cert exists)
-            await create_client_certificate(client_name)
-
-            # Build the inline .ovpn profile
-            config_data = build_ovpn_profile(client_name)
-
-        except VPNProvisionerError as e:
-            logger.error("VPN provisioning failed for user %s: %s", user.id, str(e))
-            raise VpnConfigurationError(
-                detail="Failed to generate VPN profile. Please try again or contact support."
-            )
-
-        # Store in database
-        new_profile = VpnProfile(
-            user_id=user.id,
-            client_name=client_name,
-            config_data=config_data,
-            assigned_ip=None,  # Assigned dynamically by OpenVPN server
-            is_connected=False,
-            bytes_received=0,
-            bytes_sent=0,
-        )
-
-        db.add(new_profile)
-        await db.commit()
-        await db.refresh(new_profile)
-
-        logger.info("VPN profile created for user %s (client: %s)", user.id, client_name)
-        return new_profile
 
     async def get_vpn_status(self, db: AsyncSession, user: User) -> VpnStatusOut:
         """Get live VPN connection status by parsing the OpenVPN status log."""
@@ -151,10 +127,13 @@ class ProductionVPNService(VPNService):
         # Look up this client in the status data
         client_info = status_data.get(profile.client_name)
 
+        if client_info and client_info.get("virtual_address") != profile.assigned_ip:
+            logger.error("VPN address mismatch for user %s; reconnect after checking CCD configuration", user.id)
+            client_info = None
+
         if client_info:
-            # Update profile with live telemetry
+            # The certificate/address reservation, not the status log, is authoritative.
             profile.is_connected = True
-            profile.assigned_ip = client_info.get("virtual_address")
             profile.bytes_received = client_info.get("bytes_received", 0)
             profile.bytes_sent = client_info.get("bytes_sent", 0)
             profile.last_seen_at = datetime.now(timezone.utc)
@@ -214,41 +193,14 @@ class ProductionVPNService(VPNService):
         )
 
     async def revoke_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> bool:
-        """Revoke the user's VPN profile and certificate."""
-        from backend.app.services.vpn_provisioner import (
-            revoke_client_certificate,
-            VPNProvisionerError,
-        )
-
-        result = await db.execute(
-            select(VpnProfile).where(
-                VpnProfile.user_id == user.id,
-                VpnProfile.revoked_at.is_(None),
-            )
-        )
-        profile = result.scalars().first()
-
-        if not profile:
-            return False
-
-        try:
-            await revoke_client_certificate(profile.client_name)
-        except VPNProvisionerError as e:
-            logger.error("Certificate revocation failed for %s: %s", profile.client_name, str(e))
-            raise VpnConfigurationError(
-                detail="Failed to revoke VPN certificate. Please try again or contact support."
-            )
-
-        profile.revoked_at = datetime.now(timezone.utc)
-        profile.is_connected = False
-        await db.commit()
-
-        logger.info("VPN profile revoked for user %s (client: %s)", user.id, profile.client_name)
+        from backend.app.services.vpn_revocation import vpn_revocation_service
+        await vpn_revocation_service.request(db, user.id, user.id)
         return True
 
 
 class MockVPNService(VPNService):
     async def generate_or_get_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> VpnProfile:
+        await require_vpn_access(db, user.id, lock=True)
         result = await db.execute(select(VpnProfile).where(VpnProfile.user_id == user.id))
         profile = result.scalars().first()
 
@@ -345,13 +297,9 @@ class MockVPNService(VPNService):
         )
 
     async def revoke_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> bool:
-        result = await db.execute(select(VpnProfile).where(VpnProfile.user_id == user.id))
-        profile = result.scalars().first()
-        if profile:
-            await db.delete(profile)
-            await db.commit()
-            return True
-        return False
+        from backend.app.services.vpn_revocation import vpn_revocation_service
+        await vpn_revocation_service.request(db, user.id, user.id)
+        return True
 
 
 def get_vpn_service() -> VPNService:

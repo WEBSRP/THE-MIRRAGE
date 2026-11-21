@@ -60,16 +60,11 @@ EXPOSE 80
 # SSH (Player challenge access)
 EXPOSE 22
 
-# CTF flags
-RUN echo "MIRRAGE{web_test_flag}" > /var/www/html/flag.txt && \
-    echo "MIRRAGE{user_test_flag}" > /home/player/flag.txt && \
-    echo "MIRRAGE{root_test_flag}" > /root/flag.txt && \
-    chown www-data:www-data /var/www/html/flag.txt && \
-    chown player:player /home/player/flag.txt && \
-    chown root:root /root/flag.txt && \
-    chmod 600 /var/www/html/flag.txt && \
-    chmod 600 /home/player/flag.txt && \
-    chmod 600 /root/flag.txt
+# Values arrive through a root-only runtime mount, never image layers or env vars.
+RUN mkdir -p /run/mirrage-flags && chmod 700 /run/mirrage-flags
+COPY entrypoint.py /usr/local/sbin/mirrage-ctf-entrypoint
+RUN chmod 755 /usr/local/sbin/mirrage-ctf-entrypoint
+ENTRYPOINT ["python3", "/usr/local/sbin/mirrage-ctf-entrypoint"]
 
 # Player and www-data maintenance group
 RUN groupadd maintenance && \

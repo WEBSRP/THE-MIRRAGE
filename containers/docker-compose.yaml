@@ -6,7 +6,7 @@ services:
   # ============================================================
   mirrage:
     build:
-      context: ./mirrage
+      context: ./mirage
       dockerfile: Dockerfile
 
     container_name: mirrage
@@ -25,13 +25,13 @@ services:
     # - Docker restart
     # - EC2 reboot
     volumes:
-      - ./mirrage/data:/opt/mirrage
-      - ./mirrage/logs:/var/log/mirrage
+      - ./mirage/data:/opt/mirrage
+      - ./mirage/logs:/var/log/mirrage
 
     # SSH is available to the Docker network/VPN routing.
     # It is NOT published as EC2:port.
     expose:
-      - "22"
+      - "2222"
 
     # Do not allow container -> Docker daemon control
     privileged: false
@@ -69,11 +69,15 @@ services:
       mirrage_net:
         ipv4_address: 172.20.0.20
 
-    # Persistent CTF storage
-    #
-    # Keep this completely separate from Mirage.
+    # Mount the SAME JSON used by backend CTF_FLAGS_FILE. The image's root-only
+    # parent directory prevents players reading the complete mounted bundle.
     volumes:
-      - ./ctf/data:/opt/ctf
+      - type: bind
+        source: ${MIRRAGE_FLAGS_HOST_FILE:-../backend/ctf-flags.example.json}
+        target: /run/mirrage-flags/flags.json
+        read_only: true
+        bind:
+          create_host_path: false
       - ./ctf/logs:/var/log/ctf
 
     # SSH available internally/VPN

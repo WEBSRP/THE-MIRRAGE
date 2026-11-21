@@ -1,6 +1,9 @@
 import html
+import asyncio
+from dataclasses import dataclass
+from email.utils import formataddr
+from email_validator import validate_email
 import logging
-from typing import Optional, Protocol
 import httpx
 
 from backend.app.core.config import settings
@@ -20,7 +23,7 @@ Your MIRRAGE verification code is:
 
 {otp}
 
-This code expires in 10 minutes.
+This code expires in {settings.OTP_EXPIRY_MINUTES} minutes.
 
 If you did not request this code, you can safely ignore this email.
 
@@ -71,7 +74,7 @@ def generate_otp_email_html(otp: str) -> str:
               </table>
 
               <p style="margin: 0 0 12px 0; font-size: 13px; line-height: 1.5; color: #8A8F91;">
-                This code expires in 10 minutes.
+                This code expires in {settings.OTP_EXPIRY_MINUTES} minutes.
               </p>
               <p style="margin: 0 0 12px 0; font-size: 13px; line-height: 1.5; color: #8A8F91;">
                 If you did not request this code, you can safely ignore this email.
@@ -97,167 +100,83 @@ def generate_otp_email_html(otp: str) -> str:
 """
 
 
-class EmailServiceProvider(Protocol):
-    async def send_otp(self, email: str, otp: str) -> None:
-        ...
+@dataclass(frozen=True)
+class EmailDispatchResult:
+    outcome: str
+    http_status: int | None = None
+
+
+class EmailDeliveryError(Exception):
+    """Only fixed codes; never include provider bodies, keys, recipients or OTPs."""
+    def __init__(self, code, *, outcome="unknown", http_status=None):
+        super().__init__(code)
+        self.code = code
+        self.outcome = outcome
+        self.http_status = http_status
 
 
 class EmailService:
-    def __init__(self):
-        self.provider = settings.EMAIL_PROVIDER.lower().strip() if settings.EMAIL_PROVIDER else ""
+    def __init__(self, transport=None):
+        self.transport = transport  # Injectable HTTPX mock transport in provider tests.
 
-    def _get_from_address(self) -> str:
-        """Construct the sender address with display name if available."""
-        from_email = settings.EMAIL_FROM or settings.EMAIL_FROM_ADDRESS
-        if settings.EMAIL_FROM_NAME and from_email:
-            return f"{settings.EMAIL_FROM_NAME} <{from_email}>"
-        return from_email
+    @property
+    def provider(self):
+        value = settings.EMAIL_PROVIDER.strip().lower()
+        return value if value in {"resend", "sendgrid"} else "unconfigured" if not value else "unsupported"
 
-    async def send_otp(self, email: str, otp: str) -> None:
-        """Send OTP to the given email address using the configured provider."""
-        # Development mode: output to console only if explicitly enabled
-        if settings.ENVIRONMENT == "development" and settings.OTP_DEV_MODE:
-            print(f"========== DEV MODE OTP ==========")
-            print(f"To: {email}")
-            print(f"OTP: {otp}")
-            print(f"==================================")
-            return
+    def _sender(self):
+        return validate_email(settings.EMAIL_FROM, check_deliverability=False, allow_smtputf8=False).ascii_email
 
-        # Testing mode: silent bypass unless explicitly testing email
+    async def send_otp(self, email: str, otp: str) -> EmailDispatchResult:
         if settings.ENVIRONMENT == "testing":
-            return
-
-        subject = EMAIL_SUBJECT
-        text_content = generate_otp_email_text(otp)
-        html_content = generate_otp_email_html(otp)
-        from_header = self._get_from_address()
-
+            return EmailDispatchResult("simulated")
+        if settings.ENVIRONMENT == "development" and settings.OTP_DEV_MODE:
+            print(f"DEV MODE OTP for {email}: {otp}")
+            return EmailDispatchResult("simulated")
+        if error := settings.email_configuration_error():
+            raise EmailDeliveryError(error, outcome="failed")
+        sender = self._sender()
+        text, html_body = generate_otp_email_text(otp), generate_otp_email_html(otp)
+        reply = (validate_email(settings.EMAIL_REPLY_TO, check_deliverability=False,
+                                allow_smtputf8=False).ascii_email if settings.EMAIL_REPLY_TO else None)
         if self.provider == "resend":
-            await self._send_resend(email, subject, text_content, html_content, from_header)
-        elif self.provider == "sendgrid":
-            await self._send_sendgrid(email, subject, text_content, html_content, from_header)
-        elif self.provider == "smtp":
-            await self._send_smtp(email, subject, text_content, html_content, from_header)
+            endpoint = "https://api.resend.com/emails"
+            payload = {"from": formataddr((settings.EMAIL_FROM_NAME, sender)), "to": [email],
+                       "subject": EMAIL_SUBJECT, "text": text, "html": html_body}
+            if reply:
+                payload["reply_to"] = reply
         else:
-            if settings.ENVIRONMENT == "production":
-                raise ValueError(
-                    "EMAIL_PROVIDER is not configured for production. "
-                    "Set EMAIL_PROVIDER=resend|sendgrid|smtp and provide EMAIL_API_KEY."
-                )
-            logger.info("No EMAIL_PROVIDER configured; OTP email not sent in non-production.")
-
-    async def _send_resend(
-        self,
-        to_email: str,
-        subject: str,
-        text_content: str,
-        html_content: str,
-        from_header: str,
-    ) -> None:
-        """Send email via Resend REST API."""
-        if not settings.EMAIL_API_KEY:
-            raise ValueError("EMAIL_API_KEY is required for Resend provider")
-
-        payload = {
-            "from": from_header,
-            "to": [to_email],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content,
-        }
-        if settings.EMAIL_REPLY_TO:
-            payload["reply_to"] = settings.EMAIL_REPLY_TO
-
-        headers = {
-            "Authorization": f"Bearer {settings.EMAIL_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.resend.com/emails",
-                json=payload,
-                headers=headers,
-            )
-            if resp.status_code not in (200, 201):
-                logger.error(
-                    f"Resend email dispatch failed (HTTP {resp.status_code}). Check provider configuration."
-                )
-                raise RuntimeError(f"Email delivery failed with status {resp.status_code}")
-            logger.info(f"OTP verification email successfully queued via Resend for {to_email}")
-
-    async def _send_sendgrid(
-        self,
-        to_email: str,
-        subject: str,
-        text_content: str,
-        html_content: str,
-        from_header: str,
-    ) -> None:
-        """Send email via SendGrid v3 API."""
-        if not settings.EMAIL_API_KEY:
-            raise ValueError("EMAIL_API_KEY is required for SendGrid provider")
-
-        from_email = settings.EMAIL_FROM or settings.EMAIL_FROM_ADDRESS
-        from_dict = {"email": from_email}
-        if settings.EMAIL_FROM_NAME:
-            from_dict["name"] = settings.EMAIL_FROM_NAME
-
-        payload = {
-            "personalizations": [{"to": [{"email": to_email}]}],
-            "from": from_dict,
-            "subject": subject,
-            "content": [
-                {"type": "text/plain", "value": text_content},
-                {"type": "text/html", "value": html_content},
-            ],
-        }
-        if settings.EMAIL_REPLY_TO:
-            payload["reply_to"] = {"email": settings.EMAIL_REPLY_TO}
-
-        headers = {
-            "Authorization": f"Bearer {settings.EMAIL_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.sendgrid.com/v3/mail/send",
-                json=payload,
-                headers=headers,
-            )
-            if resp.status_code not in (200, 202):
-                logger.error(
-                    f"SendGrid email dispatch failed (HTTP {resp.status_code}). Check provider configuration."
-                )
-                raise RuntimeError(f"Email delivery failed with status {resp.status_code}")
-            logger.info(f"OTP verification email successfully queued via SendGrid for {to_email}")
-
-    async def _send_smtp(
-        self,
-        to_email: str,
-        subject: str,
-        text_content: str,
-        html_content: str,
-        from_header: str,
-    ) -> None:
-        """Send email via standard SMTP."""
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = from_header
-        msg["To"] = to_email
-        if settings.EMAIL_REPLY_TO:
-            msg["Reply-To"] = settings.EMAIL_REPLY_TO
-
-        msg.attach(MIMEText(text_content, "plain"))
-        msg.attach(MIMEText(html_content, "html"))
-
-        # In production SMTP configuration, server parameters would be loaded
-        logger.info(f"SMTP dispatch prepared for {to_email}")
+            endpoint = "https://api.sendgrid.com/v3/mail/send"
+            payload = {"personalizations": [{"to": [{"email": email}]}],
+                       "from": {"email": sender, "name": settings.EMAIL_FROM_NAME},
+                       "subject": EMAIL_SUBJECT, "content": [{"type": "text/plain", "value": text},
+                                                              {"type": "text/html", "value": html_body}]}
+            if reply:
+                payload["reply_to"] = {"email": reply}
+        try:
+            async with asyncio.timeout(settings.EMAIL_TIMEOUT_SECONDS):
+                async with httpx.AsyncClient(timeout=settings.EMAIL_TIMEOUT_SECONDS, transport=self.transport,
+                                             follow_redirects=False, trust_env=False) as client:
+                    response = await client.post(endpoint, json=payload, headers={
+                        "Authorization": f"Bearer {settings.EMAIL_API_KEY}", "Content-Type": "application/json"})
+            accepted = response.status_code == (200 if self.provider == "resend" else 202)
+            if not accepted:
+                # A server-side failure can have ambiguous side effects. Do not retry.
+                raise EmailDeliveryError("PROVIDER_REJECTED", http_status=response.status_code,
+                                         outcome="unknown" if response.status_code >= 500 else "failed")
+            if self.provider == "resend":
+                try:
+                    receipt = response.json()
+                    if not isinstance(receipt, dict) or not isinstance(receipt.get("id"), str) or not receipt["id"]:
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    raise EmailDeliveryError("PROVIDER_RESPONSE_INVALID", http_status=response.status_code) from None
+            logger.info("OTP email accepted by provider %s", self.provider)
+            return EmailDispatchResult("accepted", response.status_code)
+        except (TimeoutError, httpx.TimeoutException):
+            raise EmailDeliveryError("PROVIDER_TIMEOUT") from None
+        except httpx.RequestError:
+            raise EmailDeliveryError("PROVIDER_NETWORK_ERROR") from None
 
 
 email_service = EmailService()

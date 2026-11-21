@@ -1,0 +1,7 @@
+**/ctf-flags.json
+**/ctf-flags.*.json
+**/.env
+**/*.key
+**/*.pem
+data
+logs

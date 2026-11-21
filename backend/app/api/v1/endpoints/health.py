@@ -1,11 +1,32 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.deps import get_db
 from backend.app.core.config import settings
+from backend.app.api.deps import get_current_admin_user
+from backend.app.models.user import User
+from backend.app.services.email_health import email_health
+from backend.app.services.email_service import email_service
 
 router = APIRouter(prefix="/health", tags=["System Health & Diagnostics"])
+
+
+@router.get("/email", summary="Admin: email provider configuration and recent acceptance health")
+async def email_provider_health(response: Response,
+    current_user: User = Depends(get_current_admin_user), db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    simulated = settings.ENVIRONMENT == "testing" or (settings.ENVIRONMENT == "development" and settings.OTP_DEV_MODE)
+    error = settings.email_configuration_error()
+    report = await email_health.report(db, email_service.provider)
+    report.update(provider=email_service.provider,
+                  configuration="simulation" if simulated else "invalid" if error else "ready",
+                  configuration_error=None if simulated else error)
+    if simulated:
+        report["status"] = "simulated"
+    elif error:
+        report["status"] = "unconfigured"
+    return report
 
 
 @router.get(

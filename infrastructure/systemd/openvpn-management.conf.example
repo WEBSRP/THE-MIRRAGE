@@ -1,0 +1,8 @@
+# /etc/systemd/system/openvpn-server@server.service.d/management.conf
+# Preserve any existing RuntimeDirectory entries used by this service.
+[Service]
+RuntimeDirectory=openvpn
+RuntimeDirectoryMode=0750
+# OpenVPN can create the Unix socket as 0777 despite the service umask.
+# This unit starts as root; OpenVPN drops its own daemon privileges internally.
+ExecStartPost=/usr/bin/chmod 0600 /run/openvpn/server.mgmt

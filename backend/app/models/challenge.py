@@ -41,7 +41,7 @@ class Challenge(Base):
         default=100,
         nullable=False
     )
-    # The expected flag string (or hashed flag for verification)
+    # sha256:<hex>; legacy column name retained to avoid an ALTER on existing DBs.
     flag: Mapped[str] = mapped_column(
         String(128),
         nullable=False
@@ -90,6 +90,7 @@ class FlagSubmission(Base):
         nullable=False
     )
     submitted_flag: Mapped[str] = mapped_column(
+        # Legacy column retained; new attempts store only [REDACTED].
         String(128),
         nullable=False
     )
@@ -106,3 +107,28 @@ class FlagSubmission(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="submissions")
     challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="submissions")
+
+
+class ChallengeSolve(Base):
+    """One authoritative solve per player/challenge, enforced across workers."""
+    __tablename__ = "challenge_solves"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    challenge_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("challenges.id", ondelete="CASCADE"), primary_key=True
+    )
+    solved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class FlagSubmissionQuota(Base):
+    """Database-backed, account-wide fixed-window limit, shared by API workers."""
+    __tablename__ = "flag_submission_quotas"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    window: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)

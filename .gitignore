@@ -6,6 +6,8 @@
 # Frontend
 # ---------------------------------------------------------
 node_modules/
+playwright-report/
+test-results/
 dist/
 dist-ssr/
 *.local
@@ -28,6 +30,9 @@ venv/
 .env.*
 !.env.example
 !.env.production
+ctf-flags.json
+ctf-flags.*.json
+!ctf-flags.example.json
 
 # ---------------------------------------------------------
 # Databases (local dev)

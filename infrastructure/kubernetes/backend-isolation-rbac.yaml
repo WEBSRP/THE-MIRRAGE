@@ -1,0 +1,57 @@
+# Bind this to a dedicated kubeconfig identity, not the player service account.
+# The namespace must be created by an operator before using this controller.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mirrage-session-controller
+  namespace: mirrage-sessions
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mirrage-session-controller
+  namespace: mirrage-sessions
+subjects:
+  - kind: User
+    name: mirrage-backend
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: mirrage-session-controller
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mirrage-namespace-reader
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["mirrage-sessions"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mirrage-namespace-reader
+subjects:
+  - kind: User
+    name: mirrage-backend
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: mirrage-namespace-reader
+  apiGroup: rbac.authorization.k8s.io

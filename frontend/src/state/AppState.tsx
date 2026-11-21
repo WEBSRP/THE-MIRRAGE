@@ -58,6 +58,7 @@ export interface ExtendedChallenge extends UIChallenge {
 export type AppContextValue = {
   user: MockUser & Partial<ApiUser>;
   isAuthenticated: boolean;
+  isAuthInitializing: boolean;
   isAuthLoading: boolean;
   resendOtp: (email: string) => Promise<AuthResult>;
   requestOtp: (email: string) => Promise<AuthResult>;
@@ -167,6 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MockUser & Partial<ApiUser>>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => getToken() !== null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthInitializing, setIsAuthInitializing] = useState(true);
   const [pendingOtpEmail, setPendingOtpEmail] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -215,7 +217,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const diff = getDifficulty(ch.points);
         if (ch.is_solved) {
           solvedIds.push(ch.slug);
-          solvedIds.push(ch.id);
           totalEarnedPoints += ch.points;
         }
         return {
@@ -315,6 +316,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (mounted) {
           setIsAuthenticated(false);
           setIsAuthLoading(false);
+          setIsAuthInitializing(false);
         }
         return;
       }
@@ -333,6 +335,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } finally {
         if (mounted) {
           setIsAuthLoading(false);
+          setIsAuthInitializing(false);
         }
       }
     }
@@ -422,7 +425,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiSubmitFlag({ challenge_slug: targetSlug, flag: flag.trim() });
       if (res.is_correct) {
-        setSolvedChallengeIds((current) => [...current, targetSlug]);
+        setSolvedChallengeIds((current) => current.includes(targetSlug) ? current : [...current, targetSlug]);
         setChallenges((current) =>
           current.map((item) =>
             item.slug === targetSlug || item.id === targetSlug
@@ -641,6 +644,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextValue>(() => ({
     user,
     isAuthenticated,
+    isAuthInitializing,
     isAuthLoading,
     requestOtp,
     resendOtp,
@@ -677,6 +681,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }), [
     user,
     isAuthenticated,
+    isAuthInitializing,
     isAuthLoading,
     requestOtp,
     resendOtp,

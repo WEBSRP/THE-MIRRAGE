@@ -1,0 +1,6 @@
+# Install root:root 0440 using visudo; adjust admin to the backend service user.
+# Arguments are also parsed and validated by the root-owned helper.
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-vpn-control block --client *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-vpn-control publish --client *
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-vpn-control refresh
+admin ALL=(root) NOPASSWD: /usr/local/sbin/mirrage-vpn-control health

@@ -76,7 +76,7 @@ async def test_meaningful_activity_and_session_extension(
     submit_resp = await async_client.post(
         f"{settings.API_V1_STR}/challenges/submit",
         headers=auth_headers,
-        json={"challenge_slug": "first-reflection", "flag": "MIRRAGE{r3fl3ct10n_1s_n0t_r34l1ty_7f9a}"},
+        json={"challenge_slug": "first-reflection", "flag": "MIRRAGE{web_test_flag}"},
     )
     assert submit_resp.status_code == 200
 

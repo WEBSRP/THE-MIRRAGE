@@ -15,3 +15,6 @@ htmlcov/
 .DS_Store
 .env*
 !.env.example
+ctf-flags.json
+ctf-flags.*.json
+!ctf-flags.example.json
