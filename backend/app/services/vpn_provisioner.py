@@ -165,7 +165,7 @@ async def create_client_certificate(client_name: str) -> None:
         raise VPNProvisionerError("Certificate is revoked; explicit reissuance is required")
     if _client_cert_exists(client_name):
         return
-    await _run_easyrsa("build-client-full", client_name, "nopass")
+    await _run_easyrsa("--days=1", "build-client-full", client_name, "nopass")
 
 
 def _certificate_revoked_in_index(client_name: str) -> bool:

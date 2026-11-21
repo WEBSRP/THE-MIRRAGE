@@ -25,6 +25,8 @@ export interface SessionStatusResponse {
   last_active_at: string;
   time_remaining_seconds: number;
   is_ready: boolean;
+  vpn_download_available: boolean;
+  vpn_downloads_remaining: number;
 }
 
 export interface SlotInfo {
@@ -61,3 +63,8 @@ export async function getSlotInfo(): Promise<SlotInfo> {
 
 export const startSession = createSession;
 export const stopSession = terminateSession;
+
+
+export function canDownloadSessionVpn(session: SessionResponse | SessionStatusResponse | null): boolean {
+  return Boolean(session && 'vpn_download_available' in session && session.vpn_download_available);
+}

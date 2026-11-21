@@ -60,6 +60,8 @@ async def test_vpn_count_tracks_other_clients_without_returning_their_details():
     profile = SimpleNamespace(client_name='my-client', revoked_at=None, is_connected=False,
                               assigned_ip='10.8.0.10', bytes_received=0, bytes_sent=0,
                               connected_since=None, last_seen_at=None)
+    from backend.tests.test_vpn_expiry import profile_config
+    profile.config_data = profile_config(profile.client_name)
     service = ProductionVPNService()
     service.generate_or_get_profile = AsyncMock(return_value=profile)
     db = Mock(commit=AsyncMock())

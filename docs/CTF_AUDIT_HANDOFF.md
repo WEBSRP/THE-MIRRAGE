@@ -2,6 +2,29 @@
 
 Audit date: 2026-11-20 (UTC).
 
+**Latest deployment (21 November 2026):** production RDS and backend now use
+`20261121_0007` and the isolated release at
+`/home/admin/mirrage-releases/vpn-download-limit-2__pqa35`. Both VPN credential
+routes enforce the server-verified readiness gate and share three downloads per
+session. Existing sessions began with zero downloads counted. Backend, proxy and
+public API health passed, and OpenVPN was active. The remaining-count UI and
+session-ready popup await the user's frontend push to `main`. The authenticated
+end-to-end production flow has not been exercised.
+
+
+**Latest VPN expiry update (21 November 2026):** user requested 24-hour files,
+self-service fresh download after login and replacement of the nine old profiles.
+Implemented/deployed: new daily certificates/keys, fixed-deadline server-side
+disconnect, preserved VPN IPs, old certificates revoked, manual denies retained.
+All nine live bindings and repeat-download expiry checks passed; API is healthy.
+Backend now runs from `/home/admin/mirrage-releases/vpn-expiry-20261121T071051Z`
+with its own virtual environment and `/etc/mirrage/backend.env`. The earlier
+warnings below about running directly from this development checkout describe
+historical state; source edits no longer change the active release. Full suite
+355 passed/5 skipped, final focused 8 passed, real isolated OpenVPN expiry test
+passed. See [vpn-profile-expiry.md](vpn-profile-expiry.md) for exact deployment,
+backup/report paths, verification and required user re-download. No Git push.
+
 **Current recovery status (2026-11-21):** the user authorized EC2 recovery and
 confirmed direct SSH independent of the CTF VPN. `mirrage-backend` is now running
 with healthy public API/database. Encrypted RDS/VPN/configuration/source

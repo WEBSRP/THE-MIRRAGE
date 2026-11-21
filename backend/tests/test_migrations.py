@@ -22,7 +22,8 @@ from backend.app.models.challenge import Challenge, ChallengeSolve
 from backend.app.models.user import User
 from backend.app.models.vpn import VpnAddressReservation, VpnRevocation
 from backend.migrations.schema_20261120 import REVISIONS, schema_at
-from backend.migrations.schema_email_health import REVISION as HEAD_REVISION, schema as head_schema
+from backend.migrations.schema_email_health import REVISION as EMAIL_REVISION, schema as email_schema
+from backend.migrations.schema_vpn_download_limit import REVISION as HEAD_REVISION
 from backend.migrations.schema_otp_abuse import REVISION as ABUSE_REVISION, schema as abuse_schema
 
 
@@ -287,10 +288,10 @@ async def test_adoption_and_retention_guard_for_email_health(migration_db):
     from backend.app.models.email_delivery import EmailDeliveryAttempt
     engine = migration_db
     async with engine.begin() as connection:
-        await connection.run_sync(head_schema().create_all)
-        assert await connection.run_sync(adopt_schema) == HEAD_REVISION
+        await connection.run_sync(email_schema().create_all)
+        assert await connection.run_sync(adopt_schema) == EMAIL_REVISION
         await connection.execute(sa.insert(EmailDeliveryAttempt).values(
             provider="resend", outcome="pending", started_at=datetime.now(timezone.utc)))
     with pytest.raises(RuntimeError, match="would discard data"):
         await migrate(engine, ABUSE_REVISION, downgrade=True)
-    assert await heads(engine) == (HEAD_REVISION,)
+    assert await heads(engine) == (EMAIL_REVISION,)

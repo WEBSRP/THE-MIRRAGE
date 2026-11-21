@@ -20,6 +20,7 @@ client-config-dir /var/lib/mirrage/openvpn/ccd
 ccd-exclusive
 script-security 2
 learn-address "/usr/bin/python3 /usr/local/lib/mirrage/learn_address.py"
+client-connect "/usr/bin/python3 -I /usr/local/lib/mirrage/client_connect.py"
 max-routes-per-client 1
 # Do NOT enable client-to-client or duplicate-cn. All clients traverse tun0/guard.
 

@@ -4,7 +4,7 @@ import math
 from email_validator import validate_email, EmailNotValidError
 from pathlib import Path
 from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator, ValidationInfo
+from pydantic import AnyHttpUrl, Field, field_validator, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve the backend directory location reliably based on this file's path
@@ -208,6 +208,7 @@ class Settings(BaseSettings):
 
     # OpenVPN Engine
     VPN_MODE: str = "mock"
+    VPN_DOWNLOAD_LIMIT_PER_SESSION: int = Field(default=3, ge=1)
     OPENVPN_SERVER_HOST: str = "vpn.mirrage.internal"
     OPENVPN_SERVER_PORT: int = 1194
     OPENVPN_PROTO: str = "udp"

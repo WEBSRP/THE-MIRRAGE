@@ -310,8 +310,9 @@ async def test_get_vpn_status(async_client: AsyncClient, auth_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_get_vpn_profile(async_client: AsyncClient, auth_headers: dict):
+async def test_get_vpn_profile(async_client: AsyncClient, auth_headers: dict, start_downloadable_session):
     """Test retrieving .ovpn configuration metadata."""
+    await start_downloadable_session(auth_headers)
     response = await async_client.get(
         f"{settings.API_V1_STR}/vpn/profile",
         headers=auth_headers,
@@ -323,8 +324,9 @@ async def test_get_vpn_profile(async_client: AsyncClient, auth_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_download_ovpn_file(async_client: AsyncClient, auth_headers: dict):
+async def test_download_ovpn_file(async_client: AsyncClient, auth_headers: dict, start_downloadable_session):
     """Test direct attachment download of .ovpn file."""
+    await start_downloadable_session(auth_headers)
     response = await async_client.get(
         f"{settings.API_V1_STR}/vpn/download",
         headers=auth_headers,
@@ -335,8 +337,9 @@ async def test_download_ovpn_file(async_client: AsyncClient, auth_headers: dict)
 
 
 @pytest.mark.asyncio
-async def test_vpn_profile_is_per_user(async_client: AsyncClient, auth_headers: dict):
+async def test_vpn_profile_is_per_user(async_client: AsyncClient, auth_headers: dict, start_downloadable_session):
     """Test that VPN profile is idempotent per user."""
+    await start_downloadable_session(auth_headers)
     r1 = await async_client.get(
         f"{settings.API_V1_STR}/vpn/profile",
         headers=auth_headers,
@@ -378,8 +381,11 @@ async def test_vpn_profile_isolation(
     async_client: AsyncClient,
     auth_headers: dict,
     second_auth_headers: dict,
+    start_downloadable_session,
 ):
     """Test that users get different VPN profiles."""
+    await start_downloadable_session(auth_headers)
+    await start_downloadable_session(second_auth_headers)
     r1 = await async_client.get(
         f"{settings.API_V1_STR}/vpn/profile",
         headers=auth_headers,
@@ -425,3 +431,86 @@ class TestSecurityValidation:
         sanitized = _sanitize_error(error)
         assert "mysupersecret" not in sanitized
         assert "[sensitive content redacted]" in sanitized
+
+
+@pytest.mark.asyncio
+async def test_vpn_download_requires_countdown_and_live_pod_readiness(
+    async_client, auth_headers, db_session, start_downloadable_session, monkeypatch,
+):
+    from datetime import timedelta
+    from unittest.mock import AsyncMock
+    from backend.app.services.session_service import session_service
+    from backend.app.api.v1.endpoints.vpn import vpn_service
+
+    endpoints = ("/api/v1/vpn/profile", "/api/v1/vpn/download")
+    download = AsyncMock(wraps=vpn_service.get_download_profile)
+    monkeypatch.setattr(vpn_service, "get_download_profile", download)
+
+    for endpoint in endpoints:
+        assert (await async_client.get(endpoint, headers=auth_headers)).status_code == 409
+
+    session = await start_downloadable_session(auth_headers)
+    session.created_at += timedelta(minutes=3)
+    await db_session.commit()
+    status = await async_client.get("/api/v1/session/status", headers=auth_headers)
+    assert status.json()["is_ready"] and not status.json()["vpn_download_available"]
+    for endpoint in endpoints:
+        assert (await async_client.get(endpoint, headers=auth_headers)).status_code == 409
+    download.assert_not_awaited()
+
+    session.created_at -= timedelta(minutes=3)
+    await db_session.commit()
+    status = await async_client.get("/api/v1/session/status", headers=auth_headers)
+    assert status.json()["vpn_download_available"]
+    for endpoint in endpoints:
+        assert (await async_client.get(endpoint, headers=auth_headers)).status_code == 200
+
+    pod = session_service.k8s_provisioner.pods[session.pod_name]
+    monkeypatch.setitem(pod, "ready", False)
+    for endpoint in endpoints:
+        response = await async_client.get(endpoint, headers=auth_headers)
+        assert response.status_code == 409 and response.json()["code"] == "VPN_SESSION_NOT_READY"
+    assert download.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_vpn_download_limit_is_shared_and_failed_generation_is_refunded(
+    async_client, auth_headers, start_downloadable_session, monkeypatch,
+):
+    from unittest.mock import AsyncMock
+    from backend.app.api.v1.endpoints.vpn import vpn_service
+    from backend.app.core.exceptions import VpnConfigurationError
+
+    await start_downloadable_session(auth_headers)
+    profile_url = "/api/v1/vpn/profile"
+    download_url = "/api/v1/vpn/download"
+    status_url = "/api/v1/session/status"
+
+    provider = AsyncMock(side_effect=VpnConfigurationError("Test provider unavailable"))
+    with monkeypatch.context() as patch:
+        patch.setattr(vpn_service, "get_download_profile", provider)
+        failed = await async_client.get(profile_url, headers=auth_headers)
+        assert failed.status_code >= 400
+        provider.assert_awaited_once()
+    status = await async_client.get(status_url, headers=auth_headers)
+    assert status.json()["vpn_downloads_remaining"] == 3
+
+    for endpoint in (profile_url, download_url, download_url):
+        assert (await async_client.get(endpoint, headers=auth_headers)).status_code == 200
+
+    status = await async_client.get(status_url, headers=auth_headers)
+    assert status.json()["vpn_downloads_remaining"] == 0
+    assert status.json()["is_ready"] and not status.json()["vpn_download_available"]
+    provider.reset_mock()
+    monkeypatch.setattr(vpn_service, "get_download_profile", provider)
+    for endpoint in (profile_url, download_url):
+        denied = await async_client.get(endpoint, headers=auth_headers)
+        assert denied.status_code == 429
+        assert denied.json()["code"] == "VPN_DOWNLOAD_LIMIT_REACHED"
+    provider.assert_not_awaited()
+
+    stopped = await async_client.post("/api/v1/session/stop", headers=auth_headers)
+    assert stopped.status_code == 200
+    await start_downloadable_session(auth_headers)
+    status = await async_client.get(status_url, headers=auth_headers)
+    assert status.json()["vpn_downloads_remaining"] == 3

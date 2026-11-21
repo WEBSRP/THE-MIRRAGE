@@ -121,3 +121,20 @@ async def second_auth_headers(async_client: AsyncClient, second_user: User) -> d
     """Authenticate second user and return Bearer auth headers."""
     token = create_access_token(subject=second_user.id)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def start_downloadable_session(async_client, db_session):
+    """Provision a mock session and advance its countdown without sleeping."""
+    from datetime import timedelta
+    from backend.app.models.session import GameSession
+
+    async def start(headers):
+        response = await async_client.post("/api/v1/session/start", headers=headers)
+        assert response.status_code == 201
+        session = await db_session.get(GameSession, response.json()["session_id"])
+        session.created_at -= timedelta(minutes=3)
+        await db_session.commit()
+        return session
+
+    return start

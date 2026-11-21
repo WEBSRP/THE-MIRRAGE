@@ -90,11 +90,12 @@ async def test_production_profile_writes_ccd_and_retains_reservation_after_failu
     provisioner = import_module("backend.app.services.vpn_provisioner")
     create = AsyncMock()
     monkeypatch.setattr(provisioner, "create_client_certificate", create)
-    monkeypatch.setattr(provisioner, "build_ovpn_profile", lambda _: "test-only-config")
+    from backend.tests.test_vpn_expiry import profile_config
+    monkeypatch.setattr(provisioner, "build_ovpn_profile", profile_config)
     service = ProductionVPNService()
     profile = await service.generate_or_get_profile(db_session, test_user)
     address = profile.assigned_ip
-    assert (tmp_path / "ccd" / profile.client_name).read_text() == f"ifconfig-push {address} 255.255.255.0\n"
+    assert (tmp_path / "ccd" / profile.client_name).read_text().startswith(f"ifconfig-push {address} 255.255.255.0\n")
     assert await reserve_address(db_session, test_user.id, profile.client_name) == address
     assert (await service.generate_or_get_profile(db_session, test_user)).assigned_ip == address
     assert create.await_count == 1
@@ -104,13 +105,15 @@ async def test_production_profile_writes_ccd_and_retains_reservation_after_failu
 async def test_existing_real_certificate_name_is_preserved(db_session, test_user, tmp_path, monkeypatch):
     from backend.app.models.vpn import VpnProfile
     monkeypatch.setattr(settings, "OPENVPN_CCD_DIR", str(tmp_path))
-    old = VpnProfile(user_id=test_user.id, client_name="old-real-certificate", config_data="old-config",
+    from backend.tests.test_vpn_expiry import profile_config
+    config = profile_config("old-real-certificate")
+    old = VpnProfile(user_id=test_user.id, client_name="old-real-certificate", config_data=config,
                      assigned_ip="10.8.0.99", is_connected=False)
     db_session.add(old)
     await db_session.commit()
     profile = await ProductionVPNService().generate_or_get_profile(db_session, test_user)
     assert profile.client_name == "old-real-certificate"
-    assert profile.config_data == "old-config"
+    assert profile.config_data == config
     assert (tmp_path / "old-real-certificate").is_file()
     assert profile.assigned_ip == "10.8.0.10"
 
@@ -140,6 +143,8 @@ async def test_unexpected_vpn_telemetry_cannot_reassign_owner_address(monkeypatc
                               is_connected=True, bytes_received=0, bytes_sent=0,
                               connected_since=None, last_seen_at=None)
     service = ProductionVPNService()
+    from backend.tests.test_vpn_expiry import profile_config
+    profile.config_data = profile_config(profile.client_name)
     service.generate_or_get_profile = AsyncMock(return_value=profile)
     monkeypatch.setattr(import_module("backend.app.services.vpn_provisioner"), "parse_openvpn_status_log",
                         lambda: {"certificate-a": {"virtual_address": "10.8.0.11"}})

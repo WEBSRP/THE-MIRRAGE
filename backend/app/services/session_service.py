@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -183,6 +183,70 @@ class SessionService:
             await db.commit()
             return True
 
+    @staticmethod
+    def can_download_vpn(session: GameSession) -> bool:
+        now = datetime.now(timezone.utc)
+        return bool(
+            session.status == SessionStatus.READY
+            and session.ready_at is not None
+            and session.mirage_ip
+            and _to_utc(session.created_at) + timedelta(minutes=3) <= now
+            and now < _to_utc(session.expires_at)
+        )
+
+    @staticmethod
+    def vpn_downloads_remaining(session: GameSession) -> int:
+        return max(0, settings.VPN_DOWNLOAD_LIMIT_PER_SESSION - session.vpn_download_count)
+
+    async def consume_vpn_download(self, db: AsyncSession, user_id: str) -> str:
+        await require_vpn_access(db, user_id)
+        session = await self.get_active_session_for_user(db, user_id)
+        not_ready = MirrageException(
+            409, "VPN downloads unlock when your session is healthy and the countdown has ended.",
+            "VPN_SESSION_NOT_READY",
+        )
+        if session is None or not self.can_download_vpn(session):
+            raise not_ready
+
+        now = datetime.now(timezone.utc)
+        limit = settings.VPN_DOWNLOAD_LIMIT_PER_SESSION
+        eligible = (
+            GameSession.id == session.id,
+            GameSession.user_id == user_id,
+            GameSession.status == SessionStatus.READY,
+            GameSession.ready_at.is_not(None),
+            GameSession.mirage_ip == session.mirage_ip,
+            GameSession.created_at <= now - timedelta(minutes=3),
+            GameSession.expires_at > now,
+        )
+        # The conditional update arbitrates concurrent requests before credential work.
+        result = await db.execute(
+            update(GameSession).where(*eligible, GameSession.vpn_download_count < limit)
+            .values(vpn_download_count=GameSession.vpn_download_count + 1)
+            .returning(GameSession.vpn_download_count)
+            .execution_options(synchronize_session="fetch")
+        )
+        if result.scalar_one_or_none() is None:
+            count = await db.scalar(select(GameSession.vpn_download_count).where(*eligible))
+            if count is not None and count >= limit:
+                raise MirrageException(
+                    429, "You have used all VPN downloads for this session.",
+                    "VPN_DOWNLOAD_LIMIT_REACHED",
+                )
+            raise not_ready
+        await db.commit()
+        return session.id
+
+    async def refund_vpn_download(self, db: AsyncSession, session_id: str) -> None:
+        # Credential generation can open or commit transactions of its own.
+        await db.rollback()
+        await db.execute(
+            update(GameSession)
+            .where(GameSession.id == session_id, GameSession.vpn_download_count > 0)
+            .values(vpn_download_count=GameSession.vpn_download_count - 1)
+        )
+        await db.commit()
+
     async def _reconcile_single_session(self, db: AsyncSession, session: GameSession) -> GameSession:
         now = datetime.now(timezone.utc)
         if session.status == SessionStatus.STOPPING:
@@ -215,6 +279,10 @@ class SessionService:
             pod = await self.k8s_provisioner.get_pod_status(session.pod_name)
             if pod is None or pod.get("phase") not in ("Running", "Pending"):
                 await self._end_session(db, session, SessionStatus.TERMINATED)
+            elif settings.K8S_MODE == "production" and (
+                pod.get("user_id") != session.user_id or pod.get("session_id") != session.id
+            ):
+                raise RuntimeError("Pod ownership does not match session")
             elif not pod.get("ready") or not pod.get("ip"):
                 session.status = SessionStatus.INITIALIZING
                 session.mirage_ip = session.pod_ip = session.ctf_ip = None
@@ -487,6 +555,8 @@ class SessionService:
             last_active_at=session.last_active_at,
             time_remaining_seconds=time_rem,
             is_ready=is_ready,
+            vpn_download_available=self.can_download_vpn(session) and self.vpn_downloads_remaining(session) > 0,
+            vpn_downloads_remaining=self.vpn_downloads_remaining(session),
         )
 
     async def record_activity(
@@ -705,6 +775,8 @@ class SessionService:
             last_active_at=session.last_active_at,
             time_remaining_seconds=_time_remaining(session.expires_at),
             is_ready=is_ready,
+            vpn_download_available=self.can_download_vpn(session) and self.vpn_downloads_remaining(session) > 0,
+            vpn_downloads_remaining=self.vpn_downloads_remaining(session),
         )
 
     async def cleanup_expired_sessions(self, db: AsyncSession) -> int:

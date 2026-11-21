@@ -1,5 +1,7 @@
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { ToastViewport } from './components/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { canDownloadSessionVpn } from './services/sessionService';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Button, Modal, ToastViewport } from './components/ui';
 import { AvailabilityNotice } from './components/AvailabilityNotice';
 import { AuthLayout, PlatformLayout } from './layouts/PlatformLayout';
 import { LandingPage } from './pages/LandingPage';
@@ -12,6 +14,41 @@ import { ProfilePage, SettingsPage } from './pages/AccountPages';
 import { LeaderboardPage } from './pages/LeaderboardPage';
 import { DocsPage } from './pages/DocsPage';
 import { useApp } from './state/AppState';
+
+function SessionReadyNotice() {
+  const { activeSessionData, isAuthenticated, pushToast } = useApp();
+  const navigate = useNavigate();
+  const announced = useRef<string | null>(null);
+  const [noticeSession, setNoticeSession] = useState<string | null>(null);
+  const sessionId = isAuthenticated && canDownloadSessionVpn(activeSessionData)
+    ? activeSessionData?.session_id
+    : undefined;
+  const close = useCallback(() => setNoticeSession(null), []);
+
+  useEffect(() => {
+    if (!sessionId || announced.current === sessionId) return;
+    const key = 'mirrage-vpn-ready-notice';
+    try {
+      if (sessionStorage.getItem(key) === sessionId) return;
+      sessionStorage.setItem(key, sessionId);
+    } catch {
+      // The in-memory ref still prevents repeated alerts when storage is unavailable.
+    }
+    announced.current = sessionId;
+    setNoticeSession(sessionId);
+    pushToast('Session ready', 'Your VPN profile is available on the VPN page.', 'success');
+  }, [sessionId, pushToast]);
+
+  return (
+    <Modal open={Boolean(sessionId && noticeSession === sessionId)} onClose={close} size="small" title="Your session is ready">
+      <p className="ui-dialog-message">Download your VPN profile from the VPN page to connect to your session.</p>
+      <div className="ui-dialog-actions">
+        <Button onClick={close} variant="ghost">Later</Button>
+        <Button onClick={() => { close(); navigate('/vpn'); }} variant="primary">Go to VPN page</Button>
+      </div>
+    </Modal>
+  );
+}
 
 function ProtectedRoute() {
   const { isAuthenticated, isAuthInitializing } = useApp();
@@ -111,6 +148,7 @@ export default function App() {
         <Route element={<PassagePage />} path="/passage" />
         <Route element={<NotFoundPage />} path="*" />
       </Routes>
+      <SessionReadyNotice />
       <ToastViewport />
       <AvailabilityNotice />
     </BrowserRouter>
