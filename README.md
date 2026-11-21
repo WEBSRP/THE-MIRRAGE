@@ -49,8 +49,8 @@ k3s (mirrage-sessions namespace)
   |
   v
 Per-player Pod
-  |-- Mirage   (honeypot SSH, port 22)
-  |-- CTF      (challenge SSH, port 2222)
+  |-- Mirage   (SSH decoy, port 2222)
+  |-- CTF      (challenge SSH 22, HTTP 80)
 ```
 
 ---
@@ -192,6 +192,15 @@ See [docs/deployment.md](docs/deployment.md) for full production deployment inst
 
 ## Security
 
+For shared web/user/root flag configuration, runtime injection, submission limits,
+and deployment/migration steps, see [docs/shared-flags.md](docs/shared-flags.md).
+
+For per-player VPN/pod isolation and its deployment procedure, see [docs/player-isolation.md](docs/player-isolation.md).
+For targeted administrator VPN revocation, durable retries and verified CRL maintenance,
+see [docs/vpn-revocation.md](docs/vpn-revocation.md). Live rollout and acceptance remain pending.
+For abandoned pods, policies and gateway bindings, see [docs/orphan-cleanup.md](docs/orphan-cleanup.md).
+Database startup now requires explicit migrations; see [docs/database-migrations.md](docs/database-migrations.md) for checked adoption, upgrades and recovery.
+
 See [docs/security.md](docs/security.md) for the full security model.
 
 **Never commit to Git:**
@@ -202,6 +211,9 @@ See [docs/security.md](docs/security.md) for the full security model.
 - Database credentials
 
 Email OTP is the only authentication method. New accounts are created after email verification. Password login, password registration, and development login endpoints are unavailable.
+For concurrent verification, resend limits and rollout notes, see [docs/otp-atomicity.md](docs/otp-atomicity.md).
+For per-IP requests, global email budgets and trusted proxy setup, see [docs/otp-abuse-controls.md](docs/otp-abuse-controls.md).
+For supported providers, startup readiness and admin-only acceptance health, see [docs/email-readiness.md](docs/email-readiness.md).
 
 ---
 

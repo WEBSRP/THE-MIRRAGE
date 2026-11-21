@@ -1,0 +1,4 @@
+# /etc/systemd/system/openvpn-server@server.service.d/player-guard.conf
+[Unit]
+Requires=mirrage-player-guard.service
+After=mirrage-player-guard.service

@@ -1,0 +1,21 @@
+[Unit]
+Description=MIRRAGE player gateway isolation
+Wants=network-online.target
+After=network-online.target time-sync.target nftables.service k3s.service
+Before=openvpn-server@server.service mirrage-backend.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStartPre=/usr/sbin/modprobe br_netfilter
+ExecStartPre=/usr/sbin/sysctl -p /etc/sysctl.d/99-mirrage-player-guard.conf
+ExecStart=/usr/local/sbin/mirrage-session-access install
+RemainAfterExit=yes
+StateDirectory=mirrage/player-guard
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mirrage/player-guard
+
+[Install]
+WantedBy=multi-user.target

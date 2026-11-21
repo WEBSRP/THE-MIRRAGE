@@ -49,19 +49,24 @@ cd THE-MIRRAGE
    VPN_MODE=mock
    ```
 
-4. Initialize the local database:
+4. From the repository root, explicitly migrate the local database:
    ```bash
-   python scripts/init_db.py
+   cd ..
+   backend/.venv/bin/python -m backend.scripts.migrate status
+   backend/.venv/bin/python -m backend.scripts.migrate upgrade
    ```
+   Existing unversioned databases require checked adoption first. See
+   [database migrations and recovery](database-migrations.md). Startup verifies the
+   migration revision and no longer creates missing tables.
 
 5. Start the FastAPI development server from the repository root:
    ```bash
    cd /home/admin/THE-MIRRAGE
-   PYTHONPATH=. backend/.venv/bin/uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+   PYTHONPATH=. backend/.venv/bin/uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
    ```
    Alternatively, if `.venv` is activated:
    ```bash
-   PYTHONPATH=. uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+   PYTHONPATH=. uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
    ```
    The interactive API documentation is accessible at `http://127.0.0.1:8000/docs`.
 
@@ -87,6 +92,15 @@ cd THE-MIRRAGE
 
 ## 2. EC2 Production Deployment
 
+Production now requires explicit Resend/SendGrid configuration and the current
+migration head. Review [email-readiness.md](email-readiness.md); SMTP is unsupported.
+Complete a controlled mailbox test after the reviewed rollout.
+
+Before restarting the updated backend, complete the reviewed backup, checked
+adoption/upgrade and recovery rehearsal in [database-migrations.md](database-migrations.md).
+No migration runs automatically at service startup. Deployment of the isolation,
+revocation and orphan-cleanup prerequisites remains required.
+
 In production, the backend, reverse proxy, ingress tunnel, and game sandboxes operate on an AWS EC2 instance (Ubuntu 24.04 LTS), while the frontend is hosted on Vercel.
 
 ### Step 1: Backend Systemd Service
@@ -111,7 +125,7 @@ The backend runs as an unprivileged systemd service managed by systemd.
    WorkingDirectory=/home/admin/THE-MIRRAGE
    Environment="PYTHONPATH=/home/admin/THE-MIRRAGE"
    Environment="PATH=/home/admin/THE-MIRRAGE/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-   ExecStart=/home/admin/THE-MIRRAGE/backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+   ExecStart=/home/admin/THE-MIRRAGE/backend/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
    Restart=on-failure
    RestartSec=5
 
@@ -127,7 +141,7 @@ The backend runs as an unprivileged systemd service managed by systemd.
 
 ### Step 2: Nginx Reverse Proxy Configuration
 
-Nginx accepts local connections on port 80 and proxies them to the FastAPI application on port 8000.
+Nginx accepts only loopback connections on port 80 and proxies them to the FastAPI application on port 8000. Review [OTP abuse controls](otp-abuse-controls.md) and configure the immediate proxy allowlist before rollout. The updated template requires a Cloudflare visitor identity, overwrites client identity headers and pairs with Uvicorn `--no-proxy-headers`.
 
 1. Install Nginx:
    ```bash

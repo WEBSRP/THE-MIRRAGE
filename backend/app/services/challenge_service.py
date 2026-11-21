@@ -1,175 +1,181 @@
-from typing import List, Tuple
-from sqlalchemy import select
+import hmac
+import math
+import time
+from datetime import datetime, timezone
+from typing import List
+
+from sqlalchemy import case, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.app.core.exceptions import EntityNotFoundError
-from backend.app.models.activity import ActivityEventType
-from backend.app.models.challenge import Challenge, FlagSubmission
+
+from backend.app.core.config import settings
+from backend.app.core.exceptions import EntityNotFoundError, MirrageException
+from backend.app.core.flags import DIGEST_PATTERN, STAGE_SLUGS, flag_digest, get_shared_flags
+from backend.app.models.activity import ActivityEventType, ActivityLog
+from backend.app.models.challenge import Challenge, ChallengeSolve, FlagSubmission, FlagSubmissionQuota
+from backend.app.models.session import GameSession, SessionStatus
 from backend.app.models.user import User
 from backend.app.schemas.challenge import ChallengeOut, FlagSubmitResponse
-from backend.app.services.activity_service import activity_service
 
 
-# Public copy is separate from persisted challenge data so older installations
-# also receive spoiler-free descriptions without changing flags or solve records.
+# Keep existing slugs/IDs and solve history, while describing the actual lab.
 PLAYER_CHALLENGE_TEXT = {
+    "first-reflection": {
+        "category": "Web",
+        "description": "Investigate the target web application and recover its web-stage flag.",
+        "hint": "Explore the application's features and how it processes your input.",
+    },
     "sub-stratum-breach": {
-        "category": "Network",
-        "description": "Enumerate the assigned target and investigate its services to recover the flag.",
-        "hint": "Start with the target address in your Session Console and inspect available services.",
+        "category": "Linux",
+        "description": "Explore the target system and recover the player account's flag.",
+        "hint": "Investigate file permissions and recurring system tasks.",
     },
     "oasis-evaporation": {
-        "category": "Forensics",
-        "description": "Examine application records and system artifacts to reconstruct the missing evidence.",
-        "hint": "Check timestamps, archived records, and rotated logs.",
+        "category": "Linux",
+        "description": "Investigate privileged system operations and recover the root-stage flag.",
+        "hint": "Consider which configuration files privileged processes trust.",
     },
 }
 
 
+def _insert(db: AsyncSession, model):
+    dialect = db.bind.dialect.name
+    if dialect == "postgresql":
+        return pg_insert(model)
+    if dialect == "sqlite":
+        return sqlite_insert(model)
+    raise RuntimeError("Flag submissions require PostgreSQL or SQLite")
+
+
 class ChallengeService:
     async def seed_default_challenges(self, db: AsyncSession) -> None:
-        """Seed foundational MIRRAGE deception & CTF challenges if not present."""
-        default_challenges = [
-            {
-                "slug": "first-reflection",
-                "title": "The First Reflection",
-                "category": "Perception",
-                "description": (
-                    "Investigate the initial survey records. Discard the apparent monument "
-                    "and find the underlying coordinates left by the secondary survey team."
-                ),
-                "points": 100,
-                "flag": "MIRRAGE{r3fl3ct10n_1s_n0t_r34l1ty_7f9a}",
-                "hint": "Inspect Archive 003 cross-references and the sub-stratum echo.",
-            },
-            {
-                "slug": "sub-stratum-breach",
-                "title": "Sub-Stratum Breach",
-                **PLAYER_CHALLENGE_TEXT["sub-stratum-breach"],
-                "points": 250,
-                "flag": "MIRRAGE{b3y0nd_th3_d3c0y_c0nt41n3r_82k1}",
-            },
-            {
-                "slug": "oasis-evaporation",
-                "title": "The Dried Riverbed",
-                **PLAYER_CHALLENGE_TEXT["oasis-evaporation"],
-                "points": 300,
-                "flag": "MIRRAGE{p4rch3d_34rth_r3v34ls_4ll_491d}",
-            },
-        ]
+        """Synchronize verifiers and migrate legacy data without changing IDs/solves.
 
-        for chal_data in default_challenges:
-            query = select(Challenge).where(Challenge.slug == chal_data["slug"])
-            result = await db.execute(query)
-            existing = result.scalars().first()
-            if not existing:
-                challenge = Challenge(**chal_data)
+        Versioned migrations create the required tables first. Raw historical submissions are
+        intentionally redacted. Existing points and active state are retained.
+        """
+        flags = get_shared_flags()
+        titles = ["The First Reflection", "Sub-Stratum Breach", "The Dried Riverbed"]
+        for (stage, slug), title, points in zip(STAGE_SLUGS.items(), titles, (100, 250, 300)):
+            challenge = (await db.execute(select(Challenge).where(Challenge.slug == slug))).scalars().first()
+            if challenge is None:
+                challenge = Challenge(slug=slug, title=title, points=points)
                 db.add(challenge)
+            challenge.flag = flag_digest(flags[stage])
+            for key, value in PLAYER_CHALLENGE_TEXT[slug].items():
+                setattr(challenge, key, value)
 
+        await db.flush()
+        for challenge in (await db.execute(select(Challenge))).scalars().all():
+            if not DIGEST_PATTERN.fullmatch(challenge.flag):
+                challenge.flag = flag_digest(challenge.flag)
+
+        # Backfill historic solves, collapsing duplicate correct attempts.
+        legacy = await db.execute(
+            select(FlagSubmission.user_id, FlagSubmission.challenge_id,
+                   func.min(FlagSubmission.timestamp), Challenge.points)
+            .join(Challenge, Challenge.id == FlagSubmission.challenge_id)
+            .where(FlagSubmission.is_correct.is_(True))
+            .group_by(FlagSubmission.user_id, FlagSubmission.challenge_id, Challenge.points)
+        )
+        for user_id, challenge_id, solved_at, points in legacy:
+            await db.execute(_insert(db, ChallengeSolve).values(
+                user_id=user_id, challenge_id=challenge_id, solved_at=solved_at, points=points
+            ).on_conflict_do_nothing(index_elements=["user_id", "challenge_id"]))
+        await db.execute(update(FlagSubmission).where(
+            FlagSubmission.submitted_flag != "[REDACTED]"
+        ).values(submitted_flag="[REDACTED]"))
         await db.commit()
 
     async def list_challenges(self, db: AsyncSession, user: User) -> List[ChallengeOut]:
-        """List active challenges with player's solve status."""
-        query = select(Challenge).where(Challenge.is_active.is_(True))
-        result = await db.execute(query)
-        challenges = list(result.scalars().all())
+        challenges = (await db.execute(
+            select(Challenge).where(Challenge.is_active.is_(True)).order_by(Challenge.points, Challenge.slug)
+        )).scalars().all()
+        solved_ids = set((await db.execute(
+            select(ChallengeSolve.challenge_id).where(ChallengeSolve.user_id == user.id)
+        )).scalars().all())
+        return [ChallengeOut(
+            id=c.id, slug=c.slug, title=c.title, points=c.points,
+            category=PLAYER_CHALLENGE_TEXT.get(c.slug, {}).get("category", c.category),
+            description=PLAYER_CHALLENGE_TEXT.get(c.slug, {}).get("description", c.description),
+            hint=PLAYER_CHALLENGE_TEXT.get(c.slug, {}).get("hint", c.hint),
+            is_solved=c.id in solved_ids,
+        ) for c in challenges]
 
-        # Fetch solved challenge IDs for this user
-        sub_query = select(FlagSubmission.challenge_id).where(
-            FlagSubmission.user_id == user.id,
-            FlagSubmission.is_correct.is_(True)
-        )
-        sub_result = await db.execute(sub_query)
-        solved_ids = set(sub_result.scalars().all())
-
-        out = []
-        for c in challenges:
-            public_text = PLAYER_CHALLENGE_TEXT.get(c.slug, {})
-            out.append(
-                ChallengeOut(
-                    id=c.id,
-                    slug=c.slug,
-                    title=c.title,
-                    category=public_text.get("category", c.category),
-                    description=public_text.get("description", c.description),
-                    points=c.points,
-                    hint=public_text.get("hint", c.hint),
-                    is_solved=c.id in solved_ids,
-                )
+    async def _consume_submission_budget(self, db: AsyncSession, user_id: str) -> None:
+        now = time.time()
+        seconds = settings.FLAG_SUBMISSION_WINDOW_SECONDS
+        window = int(now // seconds)
+        table = FlagSubmissionQuota
+        statement = _insert(db, table).values(user_id=user_id, window=window, attempts=1)
+        statement = statement.on_conflict_do_update(
+            index_elements=["user_id"],
+            set_={"window": window, "attempts": case(
+                (table.window != window, 1), else_=table.attempts + 1
+            )},
+            where=(table.window != window) | (table.attempts < settings.FLAG_SUBMISSIONS_PER_WINDOW),
+        ).returning(table.attempts)
+        allowed = (await db.execute(statement)).scalar_one_or_none()
+        # Consume budget independently of subsequent validation failures.
+        await db.commit()
+        if allowed is None:
+            raise MirrageException(
+                status_code=429, code="FLAG_RATE_LIMIT",
+                detail="Too many flag submissions. Please try again shortly.",
+                headers={"Retry-After": str(max(1, math.ceil((window + 1) * seconds - now)))},
             )
-        return out
 
     async def submit_flag(
-        self,
-        db: AsyncSession,
-        user: User,
-        challenge_slug: str,
-        submitted_flag: str
+        self, db: AsyncSession, user: User, challenge_slug: str, submitted_flag: str
     ) -> FlagSubmitResponse:
-        """Verify submitted flag, record attempt, and award points."""
-        query = select(Challenge).where(Challenge.slug == challenge_slug)
-        result = await db.execute(query)
-        challenge = result.scalars().first()
-
-        if not challenge:
+        await self._consume_submission_budget(db, user.id)
+        challenge = (await db.execute(select(Challenge).where(
+            Challenge.slug == challenge_slug, Challenge.is_active.is_(True)
+        ))).scalars().first()
+        if challenge is None:
             raise EntityNotFoundError("Challenge", challenge_slug)
 
-        # Check if already solved
-        sub_query = select(FlagSubmission).where(
-            FlagSubmission.user_id == user.id,
-            FlagSubmission.challenge_id == challenge.id,
-            FlagSubmission.is_correct.is_(True)
-        )
-        sub_result = await db.execute(sub_query)
-        already_solved = sub_result.scalars().first() is not None
-
-        import hmac
-        is_correct = hmac.compare_digest(submitted_flag.strip(), challenge.flag.strip())
-
-        # Record submission
-        submission = FlagSubmission(
-            user_id=user.id,
-            challenge_id=challenge.id,
-            submitted_flag=submitted_flag.strip(),
-            is_correct=is_correct,
-        )
-        db.add(submission)
-
-        # Extend player's active session lifetime on meaningful action
-        from backend.app.services.session_service import session_service
-        await session_service.record_activity_for_user(db, user.id)
-
-        # Log activity (never log the actual flag or secret values)
-        await activity_service.log_event(
-            db=db,
-            user_id=user.id,
-            event_type=ActivityEventType.FLAG_SUBMISSION,
-            summary=f"Flag submission for '{challenge.title}': {'CORRECT' if is_correct else 'INCORRECT'}",
-            payload={"challenge_slug": challenge_slug, "is_correct": is_correct}
-        )
-
-        await db.commit()
-
+        if not DIGEST_PATTERN.fullmatch(challenge.flag):
+            raise MirrageException(503, "Challenge verifier is not configured", "FLAG_NOT_CONFIGURED")
+        is_correct = hmac.compare_digest(flag_digest(submitted_flag), challenge.flag)
+        now = datetime.now(timezone.utc)
         if is_correct:
-            if already_solved:
-                return FlagSubmitResponse(
-                    is_correct=True,
-                    message="Flag is correct, but you have already solved this challenge.",
-                    points_awarded=0,
-                    already_solved=True,
-                )
-            return FlagSubmitResponse(
-                is_correct=True,
-                message=f"Congratulations! You solved '{challenge.title}' .",
-                points_awarded=challenge.points,
-                already_solved=False,
-            )
+            result = await db.execute(_insert(db, ChallengeSolve).values(
+                user_id=user.id, challenge_id=challenge.id, solved_at=now, points=challenge.points
+            ).on_conflict_do_nothing(index_elements=["user_id", "challenge_id"])
+                .returning(ChallengeSolve.user_id))
+            already_solved = result.scalar_one_or_none() is None
         else:
-            return FlagSubmitResponse(
-                is_correct=False,
-                message="Incorrect flag. Question what you found.",
-                points_awarded=0,
-                already_solved=already_solved,
-            )
+            already_solved = (await db.execute(select(ChallengeSolve.user_id).where(
+                ChallengeSolve.user_id == user.id, ChallengeSolve.challenge_id == challenge.id
+            ))).scalar_one_or_none() is not None
+
+        db.add(FlagSubmission(user_id=user.id, challenge_id=challenge.id,
+                              submitted_flag="[REDACTED]", is_correct=is_correct))
+        db.add(ActivityLog(
+            user_id=user.id, event_type=ActivityEventType.FLAG_SUBMISSION,
+            summary=f"Flag submission for '{challenge.title}': {'CORRECT' if is_correct else 'INCORRECT'}",
+            payload={"challenge_slug": challenge_slug, "is_correct": is_correct},
+        ))
+        await db.execute(update(GameSession).where(
+            GameSession.user_id == user.id,
+            GameSession.status.in_([SessionStatus.PENDING, SessionStatus.INITIALIZING,
+                                   SessionStatus.PROVISIONING, SessionStatus.READY]),
+            GameSession.expires_at > now,
+        ).values(last_active_at=now))
+        # Solve, attempt and activity commit together; no helper commits in between.
+        await db.commit()
+        if not is_correct:
+            message = "Incorrect flag. Question what you found."
+        elif already_solved:
+            message = "Flag is correct, but you have already solved this challenge."
+        else:
+            message = f"Congratulations! You solved '{challenge.title}'."
+        return FlagSubmitResponse(
+            is_correct=is_correct, message=message, already_solved=already_solved,
+            points_awarded=challenge.points if is_correct and not already_solved else 0,
+        )
 
 
 challenge_service = ChallengeService()

@@ -3,26 +3,32 @@ import logging
 from backend.app.core.config import settings
 from backend.app.core.database import AsyncSessionLocal
 from backend.app.services.session_service import session_service
+from backend.app.services.vpn_revocation import vpn_revocation_service
+from backend.app.services.orphan_cleanup import orphan_cleanup_service
+from backend.app.services.otp_abuse import otp_abuse_limiter
+from backend.app.services.email_health import email_health
 
 logger = logging.getLogger("mirrage.worker.cleanup")
 
 
 async def session_cleanup_worker():
-    """Background task to periodically reap expired sessions and reconcile orphaned pods."""
-    logger.info("Starting MIRRAGE session cleanup worker...")
+    """Independent durable jobs: a failed CRL operation cannot skip pod cleanup."""
+    logger.info("Starting MIRRAGE cleanup/revocation worker...")
+    operations = [
+        ("vpn_revocations", vpn_revocation_service.process_pending),
+        ("expired_sessions", session_service.cleanup_expired_sessions),
+        ("session_reconciliation", session_service.reconcile_orphaned_sessions),
+        ("orphan_resources", orphan_cleanup_service.sweep),
+        ("crl_maintenance", vpn_revocation_service.maintain_crl),
+        ("otp_ip_buckets", otp_abuse_limiter.cleanup),
+        ("email_health", email_health.cleanup),
+    ]
     while True:
-        try:
-            async with AsyncSessionLocal() as db:
-                # 1. Clean up expired sessions (existing behavior)
-                cleaned_count = await session_service.cleanup_expired_sessions(db)
-                if cleaned_count > 0:
-                    logger.info(f"Reaped and cleaned up {cleaned_count} expired session(s)")
-
-                # 2. Reconcile sessions whose K8s pods have vanished
-                reconciled_count = await session_service.reconcile_orphaned_sessions(db)
-                if reconciled_count > 0:
-                    logger.info(f"Reconciled {reconciled_count} orphaned session(s) (pods no longer exist)")
-        except Exception as e:
-            logger.error(f"Error in session cleanup worker: {e}")
-
-        await asyncio.sleep(settings.SESSION_CLEANUP_INTERVAL_SECONDS)
+        for name, operation in operations:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await operation(db)
+            except Exception:
+                logger.error("Background operation failed: %s; will retry", name)
+        await asyncio.sleep(min(settings.SESSION_CLEANUP_INTERVAL_SECONDS,
+                                settings.VPN_REVOCATION_RETRY_SECONDS))

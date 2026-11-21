@@ -1,0 +1,381 @@
+From f41c82ea239ddad67ba723942a888332374c65a1 Mon Sep 17 00:00:00 2001
+From: Soumya Ranjan <sksoumya1212@outlook.in>
+Date: Sat, 21 Nov 2026 06:35:54 +0000
+Subject: [PATCH] Fix OTP forms resetting during authentication requests
+
+---
+ .gitignore                       |   4 ++
+ frontend/package-lock.json       |  46 ++++++++++++
+ frontend/package.json            |   2 +
+ frontend/playwright.config.ts    |  14 ++++
+ frontend/src/App.tsx             |  12 ++--
+ frontend/src/pages/AuthPages.tsx |   4 +-
+ frontend/src/state/AppState.tsx  |   6 ++
+ frontend/tests/otp-flow.spec.ts  | 120 +++++++++++++++++++++++++++++++
+ 8 files changed, 201 insertions(+), 7 deletions(-)
+ create mode 100644 frontend/playwright.config.ts
+ create mode 100644 frontend/tests/otp-flow.spec.ts
+
+diff --git a/.gitignore b/.gitignore
+index 2e0337c..c47c5b3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -73,3 +73,7 @@ lerna-debug.log*
+ MIRRAGE Cyber Interface UI Kit.png
+ AI_HANDOFF.md
+ migration
++
++# Browser regression output
++playwright-report/
++test-results/
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index 75833e6..8985031 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -13,6 +13,7 @@
+         "react-router-dom": "^7.18.4"
+       },
+       "devDependencies": {
++        "@playwright/test": "^1.65.1",
+         "@types/react": "^19.2.18",
+         "@types/react-dom": "^19.2.4",
+         "@vitejs/plugin-react": "^6.1.0",
+@@ -354,6 +355,22 @@
+         "node": "^20.19.0 || >=22.12.0"
+       }
+     },
++    "node_modules/@playwright/test": {
++      "version": "1.65.1",
++      "resolved": "https://registry.npmjs.org/@playwright/test/-/test-1.65.1.tgz",
++      "integrity": "sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "dependencies": {
++        "playwright": "1.65.1"
++      },
++      "bin": {
++        "playwright": "cli.js"
++      },
++      "engines": {
++        "node": ">=20"
++      }
++    },
+     "node_modules/@rolldown/binding-android-arm-eabi": {
+       "version": "1.2.14",
+       "resolved": "https://registry.npmjs.org/@rolldown/binding-android-arm-eabi/-/binding-android-arm-eabi-1.2.14.tgz",
+@@ -1078,6 +1095,35 @@
+         "url": "https://github.com/sponsors/jonschlinkert"
+       }
+     },
++    "node_modules/playwright": {
++      "version": "1.65.1",
++      "resolved": "https://registry.npmjs.org/playwright/-/playwright-1.65.1.tgz",
++      "integrity": "sha512-vJ1FuoOrNwOKHUIVEvSt3jT1L+wjjDpwhwIstKtfvTh8XIG4FG4bIFuvNdMxi81LGfAhUgUZleVFaOLY4RIUUw==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "dependencies": {
++        "playwright-core": "1.65.1"
++      },
++      "bin": {
++        "playwright": "cli.js"
++      },
++      "engines": {
++        "node": ">=20"
++      }
++    },
++    "node_modules/playwright-core": {
++      "version": "1.65.1",
++      "resolved": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.65.1.tgz",
++      "integrity": "sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "bin": {
++        "playwright-core": "cli.js"
++      },
++      "engines": {
++        "node": ">=20"
++      }
++    },
+     "node_modules/postcss": {
+       "version": "8.5.31",
+       "resolved": "https://registry.npmjs.org/postcss/-/postcss-8.5.31.tgz",
+diff --git a/frontend/package.json b/frontend/package.json
+index ce65b0e..e2095cd 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -4,6 +4,7 @@
+   "version": "0.1.0",
+   "type": "module",
+   "scripts": {
++    "test:auth": "playwright test",
+     "dev": "vite",
+     "build": "tsc -b && vite build",
+     "lint": "oxlint",
+@@ -16,6 +17,7 @@
+     "react-router-dom": "^7.18.4"
+   },
+   "devDependencies": {
++    "@playwright/test": "^1.65.1",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^6.1.0",
+diff --git a/frontend/playwright.config.ts b/frontend/playwright.config.ts
+new file mode 100644
+index 0000000..1ffa2f3
+--- /dev/null
++++ b/frontend/playwright.config.ts
+@@ -0,0 +1,14 @@
++import { defineConfig } from '@playwright/test';
++
++export default defineConfig({
++  testDir: './tests',
++  fullyParallel: false,
++  workers: 1,
++  use: { baseURL: 'http://127.0.0.1:4189', headless: true },
++  webServer: {
++    command: 'npm run dev -- --host 127.0.0.1 --port 4189 --strictPort',
++    url: 'http://127.0.0.1:4189',
++    reuseExistingServer: false,
++    env: { VITE_API_BASE_URL: '' },
++  },
++});
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 71ed797..c6ae647 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -14,10 +14,10 @@ import { DocsPage } from './pages/DocsPage';
+ import { useApp } from './state/AppState';
+ 
+ function ProtectedRoute() {
+-  const { isAuthenticated, isAuthLoading } = useApp();
++  const { isAuthenticated, isAuthInitializing } = useApp();
+   const location = useLocation();
+ 
+-  if (isAuthLoading) {
++  if (isAuthInitializing) {
+     return (
+       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
+         <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Verifying operator credentials...</p>
+@@ -29,9 +29,11 @@ function ProtectedRoute() {
+ }
+ 
+ function PublicAuthRoute({ children }: { children: React.ReactNode }) {
+-  const { isAuthenticated, isAuthLoading } = useApp();
++  const { isAuthenticated, isAuthInitializing } = useApp();
++  const location = useLocation();
++  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
+ 
+-  if (isAuthLoading) {
++  if (isAuthInitializing) {
+     return (
+       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ink)' }}>
+         <p style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem' }}>Loading...</p>
+@@ -39,7 +41,7 @@ function PublicAuthRoute({ children }: { children: React.ReactNode }) {
+     );
+   }
+ 
+-  return isAuthenticated ? <Navigate replace to="/dashboard" /> : <>{children}</>;
++  return isAuthenticated ? <Navigate replace to={from} /> : <>{children}</>;
+ }
+ 
+ function PassagePage() {
+diff --git a/frontend/src/pages/AuthPages.tsx b/frontend/src/pages/AuthPages.tsx
+index b933cbd..c6af3ed 100644
+--- a/frontend/src/pages/AuthPages.tsx
++++ b/frontend/src/pages/AuthPages.tsx
+@@ -114,12 +114,12 @@ export function VerifyOtpPage() {
+       />
+       <form className="auth-form" onSubmit={handleSubmit}>
+         {error ? (
+-          <div className="auth-alert auth-alert-error">
++          <div className="auth-alert auth-alert-error" role="alert">
+             <Icon name="info" size={16} />
+             <span>{error}</span>
+           </div>
+         ) : (
+-          <div className="auth-alert auth-alert-success">
++          <div className="auth-alert auth-alert-success" role="status">
+             <Icon name="check" size={16} />
+             <span>{notice}</span>
+           </div>
+diff --git a/frontend/src/state/AppState.tsx b/frontend/src/state/AppState.tsx
+index 72ee9b1..29c8a7f 100644
+--- a/frontend/src/state/AppState.tsx
++++ b/frontend/src/state/AppState.tsx
+@@ -58,6 +58,7 @@ export interface ExtendedChallenge extends UIChallenge {
+ export type AppContextValue = {
+   user: MockUser & Partial<ApiUser>;
+   isAuthenticated: boolean;
++  isAuthInitializing: boolean;
+   isAuthLoading: boolean;
+   resendOtp: (email: string) => Promise<AuthResult>;
+   requestOtp: (email: string) => Promise<AuthResult>;
+@@ -167,6 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
+   const [user, setUser] = useState<MockUser & Partial<ApiUser>>(defaultUser);
+   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => getToken() !== null);
+   const [isAuthLoading, setIsAuthLoading] = useState(true);
++  const [isAuthInitializing, setIsAuthInitializing] = useState(true);
+   const [pendingOtpEmail, setPendingOtpEmail] = useState('');
+   const [toasts, setToasts] = useState<Toast[]>([]);
+ 
+@@ -315,6 +317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
+         if (mounted) {
+           setIsAuthenticated(false);
+           setIsAuthLoading(false);
++          setIsAuthInitializing(false);
+         }
+         return;
+       }
+@@ -333,6 +336,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
+       } finally {
+         if (mounted) {
+           setIsAuthLoading(false);
++          setIsAuthInitializing(false);
+         }
+       }
+     }
+@@ -641,6 +645,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
+   const value = useMemo<AppContextValue>(() => ({
+     user,
+     isAuthenticated,
++    isAuthInitializing,
+     isAuthLoading,
+     requestOtp,
+     resendOtp,
+@@ -677,6 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
+   }), [
+     user,
+     isAuthenticated,
++    isAuthInitializing,
+     isAuthLoading,
+     requestOtp,
+     resendOtp,
+diff --git a/frontend/tests/otp-flow.spec.ts b/frontend/tests/otp-flow.spec.ts
+new file mode 100644
+index 0000000..ab3fe10
+--- /dev/null
++++ b/frontend/tests/otp-flow.spec.ts
+@@ -0,0 +1,120 @@
++import { expect, test } from '@playwright/test';
++
++test.beforeEach(async ({ page }) => {
++  await page.addInitScript(() => {
++    sessionStorage.setItem('mirrage-availability-notice-dismissed', 'true');
++  });
++  // Every API request is intercepted. These tests never send real email or
++  // connect to the live backend, including post-login background polling.
++  await page.route('**/api/**', async (route) => {
++    const path = new URL(route.request().url()).pathname;
++    if (path.endsWith('/request-otp') || path.endsWith('/resend-otp')) {
++      await route.fulfill({ json: { message: 'Verification code sent.', resend_after_seconds: 0 } });
++    } else {
++      await route.fulfill({ status: 503, json: { code: 'TEST_UNAVAILABLE', message: 'Test service unavailable' } });
++    }
++  });
++});
++
++test('a failed email request preserves the email and shows the backend error', async ({ page }) => {
++  await page.route('**/api/v1/auth/request-otp', async (route) => {
++    await new Promise((resolve) => setTimeout(resolve, 150));
++    await route.fulfill({ status: 503, json: { code: 'OTP_EMAIL_UNAVAILABLE', message: 'OTP email is temporarily unavailable' } });
++  });
++  await page.goto('/login');
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await expect(page.getByRole('alert')).toContainText('OTP email is temporarily unavailable');
++  await expect(page.getByLabel('Email address')).toHaveValue('operator@example.com');
++  await expect(page).toHaveURL(/\/login$/);
++});
++
++test('a successful email request opens the code entry screen', async ({ page }) => {
++  await page.goto('/login');
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await expect(page).toHaveURL(/\/verify-otp$/);
++  await expect(page.getByLabel('Verification code')).toBeVisible();
++  await expect(page.getByText('Verification code sent to operator@example.com.')).toBeVisible();
++});
++
++test('an invalid code remains visible with its error', async ({ page }) => {
++  await page.route('**/api/v1/auth/verify-otp', async (route) => {
++    await new Promise((resolve) => setTimeout(resolve, 150));
++    await route.fulfill({ status: 401, json: { code: 'AUTHENTICATION_FAILED', message: 'Invalid OTP' } });
++  });
++  await page.goto('/login');
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await page.getByLabel('Verification code').fill('112233');
++  await page.getByRole('button', { name: 'Verify and continue' }).click();
++  await expect(page.getByText('Invalid OTP', { exact: true })).toBeVisible();
++  await expect(page.getByLabel('Verification code')).toHaveValue('112233');
++  await expect(page).toHaveURL(/\/verify-otp$/);
++});
++
++test('a failed resend preserves the code and shows the error', async ({ page }) => {
++  await page.route('**/api/v1/auth/resend-otp', async (route) => {
++    await new Promise((resolve) => setTimeout(resolve, 150));
++    await route.fulfill({ status: 429, headers: { 'Retry-After': '45' }, json: { code: 'OTP_COOLDOWN', message: 'Please wait before requesting a new code.' } });
++  });
++  await page.goto('/login');
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await page.getByLabel('Verification code').fill('112233');
++  await page.getByRole('button', { name: 'Resend code', exact: true }).click();
++  await expect(page.getByText('Please wait before requesting a new code.')).toBeVisible();
++  await expect(page.getByLabel('Verification code')).toHaveValue('112233');
++  await expect(page.getByRole('button', { name: /Resend code in \d+s/ })).toBeDisabled();
++});
++
++test('successful verification returns to the protected page originally requested', async ({ page }) => {
++  await page.route('**/api/v1/auth/verify-otp', async (route) => {
++    await route.fulfill({ json: {
++      access_token: 'browser-test-token', token_type: 'bearer', expires_in: 3600, is_new_user: false,
++      user: { id: 'browser-user', username: 'operator', email: 'operator@example.com',
++        is_active: true, is_admin: false, created_at: '2026-11-21T00:00:00Z' },
++    } });
++  });
++  await page.goto('/challenges');
++  await expect(page).toHaveURL(/\/login$/);
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await page.getByLabel('Verification code').fill('112233');
++  await page.getByRole('button', { name: 'Verify and continue' }).click();
++  await expect(page).toHaveURL(/\/challenges$/);
++});
++
++test('a successful resend clears the old code and keeps the OTP screen', async ({ page }) => {
++  await page.route('**/api/v1/auth/resend-otp', async (route) => {
++    await route.fulfill({ json: { message: 'A new code was sent.', resend_after_seconds: 60 } });
++  });
++  await page.goto('/login');
++  await page.getByLabel('Email address').fill('operator@example.com');
++  await page.getByRole('button', { name: 'Send verification code' }).click();
++  await page.getByLabel('Verification code').fill('112233');
++  await page.getByRole('button', { name: 'Resend code', exact: true }).click();
++  await expect(page.getByRole('status')).toContainText('A fresh verification code was sent to operator@example.com.');
++  await expect(page.getByLabel('Verification code')).toHaveValue('');
++  await expect(page.getByRole('button', { name: /Resend code in \d+s/ })).toBeDisabled();
++  await expect(page).toHaveURL(/\/verify-otp$/);
++});
++
++test('a stored token is checked before rendering a protected page', async ({ page }) => {
++  let release = () => {};
++  const pending = new Promise<void>((resolve) => { release = resolve; });
++  await page.addInitScript(() => localStorage.setItem('mirrage-token', 'expired-browser-test-token'));
++  await page.route('**/api/v1/auth/me', async (route) => {
++    await pending;
++    await route.fulfill({ status: 401, json: { message: 'Token expired', code: 'AUTHENTICATION_FAILED' } });
++  });
++  try {
++    await page.goto('/dashboard');
++    await expect(page.getByText('Verifying operator credentials...')).toBeVisible();
++  } finally {
++    release();
++  }
++  await expect(page).toHaveURL(/\/login$/);
++  await expect(page.getByLabel('Email address')).toBeVisible();
++  expect(await page.evaluate(() => localStorage.getItem('mirrage-token'))).toBeNull();
++});
+-- 
+2.47.3
+

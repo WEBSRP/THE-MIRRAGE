@@ -1,3 +1,7 @@
+-- HISTORICAL REFERENCE ONLY: superseded by backend/alembic.ini and checked
+-- adoption/versioned upgrades. Do not apply this file to repair migration drift.
+-- See docs/database-migrations.md before changing an existing database.
+
 -- ====================================================================
 -- MIRRAGE Production Database Migration: Email OTP & Passwordless Auth
 -- ====================================================================

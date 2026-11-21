@@ -8,6 +8,7 @@ from backend.app.api.v1.api import api_router
 from backend.app.core.config import settings
 from backend.app.core.database import AsyncSessionLocal, init_db
 from backend.app.core.exceptions import MirrageException
+from backend.app.core.flags import get_shared_flags
 from backend.app.services.challenge_service import challenge_service
 from backend.app.workers.cleanup import session_cleanup_worker
 
@@ -26,10 +27,17 @@ async def lifespan(app: FastAPI):
 
     # 0. Validate production safety (fails closed if production is misconfigured)
     settings.validate_production_config()
+    get_shared_flags()  # Fail before touching the DB if production flags are missing/invalid.
+    if settings.K8S_MODE == "production":
+        from backend.app.services.session_gateway import session_gateway
+        await session_gateway.check()
+    if settings.VPN_MODE == "production":
+        from backend.app.services.vpn_control import vpn_control
+        await vpn_control.health()
 
-    # 1. Initialize DB tables
+    # 1. Require an explicitly migrated schema before any seed/cleanup writes.
     await init_db()
-    logger.info("Database schema synchronized.")
+    logger.info("Database migration revision verified.")
 
     # 2. Seed initial challenges
     async with AsyncSessionLocal() as db:
@@ -45,6 +53,14 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Startup reconciliation: cleaned {reconciled} orphaned session(s).")
     except Exception as e:
         logger.error(f"Startup reconciliation error: {e}")
+
+    # Scan actual resources as well as DB rows after a controller restart.
+    try:
+        from backend.app.services.orphan_cleanup import orphan_cleanup_service
+        async with AsyncSessionLocal() as db:
+            await orphan_cleanup_service.sweep(db)
+    except Exception:
+        logger.error("Startup resource sweep failed; periodic worker will retry")
 
     # 3. Start background worker for session expiration & cleanup
     cleanup_task = asyncio.create_task(session_cleanup_worker())

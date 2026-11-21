@@ -1,0 +1,9 @@
+{
+  "ca_certificate": "/etc/openvpn/server/ca.crt",
+  "crl_source": "/home/admin/openvpn-ca/pki/crl.pem",
+  "crl_destination": "/etc/openvpn/server/crl.pem",
+  "issued_directory": "/home/admin/openvpn-ca/pki/issued",
+  "ccd_directory": "/var/lib/mirrage/openvpn/ccd",
+  "management_socket": "/run/openvpn/server.mgmt",
+  "minimum_validity_seconds": 3600
+}

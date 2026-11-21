@@ -1,13 +1,9 @@
 """
 MIRRAGE Session Service — Manages player machine lifecycle.
 
-Fixes applied:
-- CRITICAL: Slot allocation uses SELECT ... FOR UPDATE to prevent TOCTOU race
-- CRITICAL: Inactivity timeout now extends expires_at on meaningful activity
-- Status polling does NOT extend session lifetime
-- Orphaned pods cleaned up on provisioning failure
-- Idempotent cleanup (double-cleanup safe)
-- Pod deletion failure handled gracefully
+Slot reservation is serialized in the database. READY requires an owner policy
+and a gateway lease. Fixed session lifetime changes only through explicit renewal.
+Cleanup revokes access before deleting pods; failures retain a slot for retries.
 """
 import asyncio
 import logging
@@ -15,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -28,6 +24,7 @@ from backend.app.core.exceptions import (
 from backend.app.models.activity import ActivityEventType, ActivityLog
 from backend.app.models.session import GameSession, SessionStatus
 from backend.app.models.user import User
+from backend.app.services.vpn_access import require_vpn_access, vpn_access_revoked
 from backend.app.schemas.session import (
     ActiveSlotsInfo,
     SessionResponse,
@@ -43,6 +40,7 @@ ACTIVE_STATUSES = [
     SessionStatus.INITIALIZING,
     SessionStatus.PROVISIONING,
     SessionStatus.READY,
+    SessionStatus.STOPPING,
 ]
 
 
@@ -67,6 +65,8 @@ class SessionService:
         self._k8s = None
         self._vpn = None
         self._slot_lock = asyncio.Lock()
+        self._runtime_lock = asyncio.Lock()
+        self._gateway = None
 
     @property
     def k8s_provisioner(self):
@@ -151,113 +151,97 @@ class SessionService:
                 if session.user_id == user_id:
                     raise ActiveSessionExistsError(session.id)
 
-    async def _reconcile_single_session(self, db: AsyncSession, session: GameSession) -> GameSession:
-        """
-        Reconcile an active session against Kubernetes.
-        Ensures:
-        1. If pod does not exist or phase is terminal (Failed/Unknown) -> terminate and clear target IP.
-        2. If session is marked READY but has no pod -> terminate and clear target IP.
-        3. If pod exists and is Running and Ready -> ensure status is READY and target IP matches CURRENT pod IP.
-        4. If pod exists and is Running/Pending but not fully Ready -> status cannot be READY.
-        """
-        if not session.is_active:
-            if session.mirage_ip or session.pod_ip:
-                session.mirage_ip = None
-                session.pod_ip = None
-                session.ctf_ip = None
-                await db.commit()
-            return session
+    @property
+    def gateway(self):
+        if self._gateway is None:
+            from backend.app.services.session_gateway import session_gateway
+            self._gateway = session_gateway
+        return self._gateway
 
-        now = datetime.now(timezone.utc)
-
-        # Check inline expiration
-        if _to_utc(session.expires_at) < now:
-            logger.info(f"Session {session.id} expired inline")
-            session.status = SessionStatus.EXPIRED
-            session.terminated_at = now
-            session.mirage_ip = None
-            session.pod_ip = None
-            session.ctf_ip = None
+    async def _end_session(self, db, session, final_status):
+        """Revoke ingress BEFORE deleting/releasing a pod IP. Retry failures."""
+        async with self._runtime_lock:
+            await db.refresh(session, with_for_update=True)
+            if final_status == SessionStatus.EXPIRED and _to_utc(session.expires_at) > datetime.now(timezone.utc):
+                return False  # A concurrent extension won the database row lock.
+            if session.status in (SessionStatus.TERMINATED, SessionStatus.EXPIRED):
+                return True
+            session.status = SessionStatus.STOPPING
+            session.mirage_ip = session.pod_ip = session.ctf_ip = None
             await db.commit()
-            if session.pod_name:
-                try:
-                    await self.k8s_provisioner.delete_player_pod(session.pod_name)
-                except Exception as e:
-                    logger.warning(f"Failed to delete expired pod {session.pod_name}: {e}")
-            return session
+            try:
+                await self.gateway.revoke(session.id)
+                if session.pod_name and not await self.k8s_provisioner.delete_player_pod(session.pod_name):
+                    raise RuntimeError("Pod or policy deletion is pending")
+                await self.gateway.forget(session.id)
+            except Exception:
+                session.error_message = "Access/resource cleanup pending; automatic retry scheduled"
+                await db.commit()
+                return False
+            session.status = final_status
+            session.terminated_at = datetime.now(timezone.utc)
+            await db.commit()
+            return True
 
-        # Active session without pod_name
+    async def _reconcile_single_session(self, db: AsyncSession, session: GameSession) -> GameSession:
+        now = datetime.now(timezone.utc)
+        if session.status == SessionStatus.STOPPING:
+            await self._end_session(db, session, SessionStatus.TERMINATED)
+            return session
+        if not session.is_active:
+            if session.mirage_ip or session.pod_ip or session.ctf_ip:
+                session.mirage_ip = session.pod_ip = session.ctf_ip = None
+                await db.commit()
+            return session
+        if await vpn_access_revoked(db, session.user_id):
+            await self._end_session(db, session, SessionStatus.TERMINATED)
+            return session
+        if _to_utc(session.expires_at) <= now:
+            await self._end_session(db, session, SessionStatus.EXPIRED)
+            return session
+        initializing = session.ready_at is None and session.status in (
+            SessionStatus.PENDING, SessionStatus.INITIALIZING, SessionStatus.PROVISIONING
+        )
+        if initializing:
+            # The start request owns the first READY transition, after gateway grant.
+            # A worker must not kill the deterministic pod record before creation.
+            if now >= _to_utc(session.created_at) + timedelta(minutes=3):
+                await self._end_session(db, session, SessionStatus.ERROR)
+            return session
         if not session.pod_name:
-            if session.status == SessionStatus.READY:
-                logger.warning(f"Session {session.id} marked READY without pod_name. Terminating.")
-                session.status = SessionStatus.TERMINATED
-                session.terminated_at = now
-                session.mirage_ip = None
-                session.pod_ip = None
-                session.ctf_ip = None
-                session.error_message = "No Kubernetes pod associated with active session"
-                await db.commit()
+            await self._end_session(db, session, SessionStatus.TERMINATED)
             return session
-
-        # Active session with pod_name: query Kubernetes
         try:
-            pod_status = await self.k8s_provisioner.get_pod_status(session.pod_name)
-            if pod_status is None:
-                logger.warning(
-                    f"Session {session.id}: pod {session.pod_name} does not exist in K8s. "
-                    f"Reconciling to TERMINATED and clearing target IP."
-                )
-                session.status = SessionStatus.TERMINATED
-                session.terminated_at = now
-                session.mirage_ip = None
-                session.pod_ip = None
-                session.ctf_ip = None
-                session.error_message = "Kubernetes pod no longer exists"
+            pod = await self.k8s_provisioner.get_pod_status(session.pod_name)
+            if pod is None or pod.get("phase") not in ("Running", "Pending"):
+                await self._end_session(db, session, SessionStatus.TERMINATED)
+            elif not pod.get("ready") or not pod.get("ip"):
+                session.status = SessionStatus.INITIALIZING
+                session.mirage_ip = session.pod_ip = session.ctf_ip = None
                 await db.commit()
-            elif pod_status.get("phase") not in ("Running", "Pending"):
-                phase = pod_status.get("phase", "Unknown")
-                logger.warning(
-                    f"Session {session.id}: pod {session.pod_name} is in phase {phase}. Reconciling to TERMINATED."
-                )
-                session.status = SessionStatus.TERMINATED
-                session.terminated_at = now
-                session.mirage_ip = None
-                session.pod_ip = None
-                session.ctf_ip = None
-                session.error_message = f"Kubernetes pod entered {phase} state"
-                await db.commit()
-            else:
-                is_ready = bool(pod_status.get("ready"))
-                current_ip = pod_status.get("ip")
-
-                if session.status == SessionStatus.READY:
-                    if not is_ready or not current_ip:
-                        logger.warning(f"Session {session.id}: pod {session.pod_name} lost readiness. Downgrading to INITIALIZING.")
-                        session.status = SessionStatus.INITIALIZING
-                        session.mirage_ip = None
-                        session.pod_ip = None
-                        await db.commit()
-                    elif session.mirage_ip != current_ip:
-                        session.mirage_ip = current_ip
-                        session.pod_ip = current_ip
-                        await db.commit()
-                elif session.status in (SessionStatus.INITIALIZING, SessionStatus.PROVISIONING, SessionStatus.PENDING):
-                    if is_ready and current_ip:
-                        logger.info(f"Session {session.id}: pod {session.pod_name} reported ready with IP {current_ip}.")
-                        session.status = SessionStatus.READY
-                        session.mirage_ip = current_ip
-                        session.pod_ip = current_ip
-                        session.ready_at = now
-                        await db.commit()
-        except Exception as e:
-            logger.error(f"K8s verification failed for session {session.id}: {e}")
-            if session.status == SessionStatus.READY:
-                session.status = SessionStatus.ERROR
-                session.error_message = "Cannot verify Kubernetes environment status"
-                session.mirage_ip = None
-                session.pod_ip = None
-                await db.commit()
-
+            elif (session.status != SessionStatus.READY or session.mirage_ip != pod["ip"]
+                  or not await self.gateway.active(session.id, session.player_vpn_ip, pod["ip"], _to_utc(session.expires_at))):
+                async with self._runtime_lock:
+                    await db.refresh(session, with_for_update=True)
+                    if not session.is_active:
+                        return session
+                    if pod.get("user_id") not in (None, session.user_id) or pod.get("session_id") not in (None, session.id):
+                        raise RuntimeError("Pod ownership changed")
+                    if settings.K8S_MODE == "production" and (
+                        pod.get("user_id") != session.user_id or pod.get("session_id") != session.id
+                    ):
+                        raise RuntimeError("Pod ownership labels are missing")
+                    await require_vpn_access(db, session.user_id, lock=True)
+                    await self.gateway.revoke(session.id)
+                    await self.gateway.forget(session.id)
+                    await self.gateway.grant(session.id, session.player_vpn_ip, pod["ip"], _to_utc(session.expires_at))
+                    session.status = SessionStatus.READY
+                    session.mirage_ip = session.pod_ip = session.ctf_ip = pod["ip"]
+                    await db.commit()
+        except Exception:
+            logger.error("Cannot reconcile session %s; revoking access", session.id)
+            await db.rollback()
+            await self._end_session(db, session, SessionStatus.ERROR)
         return session
 
     async def get_active_session_for_user(
@@ -308,6 +292,7 @@ class SessionService:
         3. Wait for pod readiness and verify CURRENT pod IP
         4. Return session details
         """
+        await require_vpn_access(db, user.id)
         # 1. Reconcile and check for existing active session
         existing_session = await self.get_active_session_for_user(db, user.id)
         if existing_session:
@@ -327,12 +312,13 @@ class SessionService:
             else:
                 raise ActiveSessionExistsError(existing_session.id)
 
+        # VPN provisioning commits its own durable reservation before slot locking.
         # 2. Atomically reserve slot and create INITIALIZING record under mutual exclusion
         async with self._slot_lock:
+            vpn_profile = await self.vpn_service.generate_or_get_profile(db, user)
+            await self.reconcile_orphaned_sessions(db)
             if db.bind and db.bind.dialect.name == "postgresql":
                 await db.execute(text("SELECT pg_advisory_xact_lock(74291823)"))
-
-            await self.reconcile_orphaned_sessions(db)
 
             count_query = select(func.count(GameSession.id)).where(
                 GameSession.status.in_(ACTIVE_STATUSES)
@@ -352,8 +338,6 @@ class SessionService:
             if existing:
                 raise ActiveSessionExistsError(existing.id)
 
-            vpn_profile = await self.vpn_service.generate_or_get_profile(db, user)
-
             now = datetime.now(timezone.utc)
             expires_at = now + timedelta(minutes=settings.SESSION_TIMEOUT_MINUTES)
             init_deadline = now + timedelta(minutes=3)
@@ -369,6 +353,9 @@ class SessionService:
                 last_active_at=now,
             )
             db.add(new_session)
+            await db.flush()
+            new_session.pod_name = self.k8s_provisioner.pod_name(new_session.id)
+            new_session.pod_namespace = settings.K8S_NAMESPACE
             await db.commit()
             await db.refresh(new_session)
 
@@ -379,36 +366,33 @@ class SessionService:
                 session_id=new_session.id,
                 user_id=user_id,
                 username=user.username,
+                player_vpn_ip=new_session.player_vpn_ip,
             )
 
             pod_status = await self.k8s_provisioner.get_pod_status(pod_name)
             if not pod_status or not pod_status.get("ready") or not pod_status.get("ip"):
                 raise RuntimeError(f"Pod {pod_name} did not become ready or has no IP")
 
-            new_session.pod_name = pod_name
-            new_session.pod_namespace = settings.K8S_NAMESPACE
-            new_session.pod_ip = pod_status["ip"]
-            new_session.mirage_ip = pod_status["ip"]
-            new_session.ctf_ip = ctf_ip
-            new_session.status = SessionStatus.READY
-            new_session.ready_at = datetime.now(timezone.utc)
-
-            self._record_activity(new_session)
-
-            async with self._slot_lock:
-                activity = ActivityLog(
-                    id=str(uuid.uuid4()),
-                    user_id=user_id,
-                    session_id=new_session.id,
+            async with self._runtime_lock:
+                await db.refresh(new_session, with_for_update=True)
+                if new_session.status != SessionStatus.INITIALIZING:
+                    raise RuntimeError("Session was stopped while provisioning")
+                await require_vpn_access(db, user_id, lock=True)
+                new_session.pod_name = pod_name
+                new_session.pod_ip = new_session.mirage_ip = pod_status["ip"]
+                new_session.ctf_ip = ctf_ip
+                await self.gateway.grant(new_session.id, new_session.player_vpn_ip,
+                                         pod_status["ip"], _to_utc(new_session.expires_at))
+                new_session.status = SessionStatus.READY
+                new_session.ready_at = datetime.now(timezone.utc)
+                self._record_activity(new_session)
+                db.add(ActivityLog(
+                    id=str(uuid.uuid4()), user_id=user_id, session_id=new_session.id,
                     event_type=ActivityEventType.SESSION_START,
                     summary=f"Player started machine (Mirage IP: {pod_status['ip']})",
-                    payload={
-                        "mirage_ip": pod_status["ip"],
-                        "vpn_ip": vpn_profile.assigned_ip,
-                        "session_id": new_session.id,
-                    },
-                )
-                db.add(activity)
+                    payload={"mirage_ip": pod_status["ip"], "vpn_ip": new_session.player_vpn_ip,
+                             "session_id": new_session.id},
+                ))
                 await db.commit()
                 await db.refresh(new_session)
 
@@ -427,20 +411,8 @@ class SessionService:
 
         except Exception as e:
             logger.error(f"Session provisioning failed for user {user_id}: {e}")
-            if new_session.pod_name:
-                try:
-                    await self.k8s_provisioner.delete_player_pod(new_session.pod_name)
-                except Exception as cleanup_err:
-                    logger.error(f"Failed to cleanup orphaned pod: {cleanup_err}")
-
-            async with self._slot_lock:
-                new_session.status = SessionStatus.ERROR
-                new_session.error_message = str(e)[:500]
-                new_session.mirage_ip = None
-                new_session.pod_ip = None
-                new_session.ctf_ip = None
-                new_session.terminated_at = datetime.now(timezone.utc)
-                await db.commit()
+            await db.rollback()
+            await self._end_session(db, new_session, SessionStatus.ERROR)
 
             raise MirrageException(
                 status_code=500,
@@ -583,31 +555,8 @@ class SessionService:
                 message="Session already stopped",
             )
 
-        # 1. Mark session stopping
-        session.status = SessionStatus.STOPPING
-        await db.commit()
-
-        # 2. Delete Kubernetes resources
-        pod_deleted = True
-        if session.pod_name:
-            try:
-                pod_deleted = await self.k8s_provisioner.delete_player_pod(session.pod_name)
-            except Exception as e:
-                logger.warning(f"Failed to delete pod {session.pod_name}: {e}")
-                pod_deleted = False
-
-        # 3. Confirm deletion where practical (delete_player_pod returns True on 404 or success)
-        # 4. Release concurrency slot (changing away from ACTIVE_STATUSES)
-        # 5. Clear runtime target information
-        session.mirage_ip = None
-        session.pod_ip = None
-        session.ctf_ip = None
-
-        # 6. Mark session stopped/ended
-        session.status = SessionStatus.TERMINATED
-        session.terminated_at = datetime.now(timezone.utc)
-        if not pod_deleted:
-            session.error_message = "Pod deletion may have failed; manual cleanup may be required"
+        if not await self._end_session(db, session, SessionStatus.TERMINATED):
+            raise MirrageException(503, "Session access cleanup is pending; retry shortly", "SESSION_CLEANUP_PENDING")
 
         activity = ActivityLog(
             id=str(uuid.uuid4()),
@@ -642,6 +591,7 @@ class SessionService:
 
         Returns the updated session status.
         """
+        await require_vpn_access(db, user.id)
         # Look for the user's latest session
         query = (
             select(GameSession)
@@ -691,23 +641,46 @@ class SessionService:
                 code="SESSION_NOT_ACTIVE",
             )
 
-        # Check max duration limit
-        new_expires_at = _to_utc(session.expires_at) + timedelta(hours=1)
-        total_duration = new_expires_at - _to_utc(session.created_at)
-        max_duration = timedelta(minutes=settings.SESSION_MAX_DURATION_MINUTES)
+        async with self._runtime_lock:
+            await db.refresh(session, with_for_update=True)
+            if session.status != SessionStatus.READY or not session.pod_ip:
+                raise MirrageException(409, "Session is not ready for extension", "SESSION_NOT_READY")
+            if not session.is_active or _to_utc(session.expires_at) <= datetime.now(timezone.utc):
+                raise MirrageException(400, "Session is no longer active", "SESSION_NOT_ACTIVE")
+            await require_vpn_access(db, session.user_id, lock=True)
+            # Check max duration limit
+            new_expires_at = _to_utc(session.expires_at) + timedelta(hours=1)
+            total_duration = new_expires_at - _to_utc(session.created_at)
+            max_duration = timedelta(minutes=settings.SESSION_MAX_DURATION_MINUTES)
 
-        if total_duration > max_duration:
-            raise MirrageException(
-                status_code=400,
-                detail=f"Cannot extend: maximum session duration of {settings.SESSION_MAX_DURATION_MINUTES} minutes would be exceeded",
-                code="MAX_DURATION_EXCEEDED",
-            )
+            if total_duration > max_duration:
+                raise MirrageException(
+                    status_code=400,
+                    detail=f"Cannot extend: maximum session duration of {settings.SESSION_MAX_DURATION_MINUTES} minutes would be exceeded",
+                    code="MAX_DURATION_EXCEEDED",
+                )
 
-        # Extend the session
-        session.expires_at = new_expires_at
-        session.last_active_at = now
-        await db.commit()
-        await db.refresh(session)
+            # Commit expiry first: a controller crash must never leave a kernel
+            # lease longer than the persisted session. Root renew cannot resurrect
+            # a binding concurrently revoked by another API worker.
+            session.expires_at = new_expires_at
+            session.last_active_at = now
+            await db.commit()
+            try:
+                await self.gateway.renew(session.id, session.player_vpn_ip, session.pod_ip, new_expires_at)
+            except Exception:
+                try:
+                    await self.gateway.revoke(session.id)
+                except Exception:
+                    pass
+                await db.refresh(session, with_for_update=True)
+                if session.status not in (SessionStatus.TERMINATED, SessionStatus.EXPIRED):
+                    session.status = SessionStatus.STOPPING
+                    session.mirage_ip = session.pod_ip = session.ctf_ip = None
+                    session.error_message = "Network renewal failed; cleanup pending"
+                    await db.commit()
+                raise MirrageException(503, "Network renewal failed; session cleanup is pending", "SESSION_CLEANUP_PENDING") from None
+            await db.refresh(session)
 
         logger.info(
             f"Session {session.id} extended by 1 hour. "
@@ -735,119 +708,29 @@ class SessionService:
         )
 
     async def cleanup_expired_sessions(self, db: AsyncSession) -> int:
-        """
-        Worker task to clean up all expired sessions across all players.
-        Idempotent: safe to run multiple times. Clears runtime target fields.
-        """
         now = datetime.now(timezone.utc)
         query = select(GameSession).where(
             GameSession.status.in_(ACTIVE_STATUSES),
-            GameSession.expires_at < now,
+            or_(GameSession.expires_at <= now, GameSession.status == SessionStatus.STOPPING,
+                (GameSession.ready_at.is_(None)) & (GameSession.created_at <= now - timedelta(minutes=3))),
         )
-        result = await db.execute(query)
-        expired_sessions: List[GameSession] = list(result.scalars().all())
-
+        sessions = (await db.execute(query)).scalars().all()
         count = 0
-        for session in expired_sessions:
-            try:
-                if session.pod_name:
-                    try:
-                        await self.k8s_provisioner.delete_player_pod(session.pod_name)
-                    except Exception as e:
-                        logger.warning(
-                            f"Cleanup: Failed to delete pod {session.pod_name} "
-                            f"for session {session.id}: {e}"
-                        )
-
-                session.status = SessionStatus.EXPIRED
-                session.terminated_at = now
-                session.mirage_ip = None
-                session.pod_ip = None
-                session.ctf_ip = None
-                count += 1
-            except Exception as e:
-                logger.error(f"Cleanup: Error processing session {session.id}: {e}")
-
-        if count > 0:
-            await db.commit()
-
+        for session in sessions:
+            final = SessionStatus.EXPIRED if _to_utc(session.expires_at) <= now else SessionStatus.TERMINATED
+            count += int(await self._end_session(db, session, final))
         return count
 
     async def reconcile_orphaned_sessions(self, db: AsyncSession) -> int:
-        """
-        Find active sessions whose Kubernetes pods no longer exist or are not healthy and reconcile them.
-        Clears target IP when reconciling.
-        """
-        query = select(GameSession).where(
-            GameSession.status.in_(ACTIVE_STATUSES),
-        )
-        result = await db.execute(query)
-        active_sessions: List[GameSession] = list(result.scalars().all())
-
-        now = datetime.now(timezone.utc)
-        reconciled = 0
-
-        for session in active_sessions:
-            try:
-                if not session.pod_name:
-                    if session.status == SessionStatus.READY:
-                        logger.warning(f"Reconciliation: Session {session.id} READY without pod. Marking TERMINATED.")
-                        session.status = SessionStatus.TERMINATED
-                        session.terminated_at = now
-                        session.mirage_ip = None
-                        session.pod_ip = None
-                        session.ctf_ip = None
-                        session.error_message = "Pod missing for READY session"
-                        reconciled += 1
-                    continue
-
-                pod_status = await self.k8s_provisioner.get_pod_status(session.pod_name)
-                if pod_status is None:
-                    logger.warning(
-                        f"Reconciliation: Session {session.id} pod {session.pod_name} "
-                        f"does not exist. Marking TERMINATED."
-                    )
-                    session.status = SessionStatus.TERMINATED
-                    session.terminated_at = now
-                    session.mirage_ip = None
-                    session.pod_ip = None
-                    session.ctf_ip = None
-                    session.error_message = "Pod reconciled: NotFound"
-                    reconciled += 1
-                elif pod_status.get("phase") not in ("Running", "Pending"):
-                    phase = pod_status.get("phase")
-                    logger.warning(
-                        f"Reconciliation: Session {session.id} pod {session.pod_name} "
-                        f"is {phase}. Marking TERMINATED."
-                    )
-                    session.status = SessionStatus.TERMINATED
-                    session.terminated_at = now
-                    session.mirage_ip = None
-                    session.pod_ip = None
-                    session.ctf_ip = None
-                    session.error_message = f"Pod reconciled: {phase}"
-                    reconciled += 1
-                elif session.status == SessionStatus.READY:
-                    if not pod_status.get("ready"):
-                        logger.warning(f"Reconciliation: Session {session.id} pod {session.pod_name} not ready. Downgrading to INITIALIZING.")
-                        session.status = SessionStatus.INITIALIZING
-                        session.mirage_ip = None
-                        session.pod_ip = None
-                        reconciled += 1
-                    elif pod_status.get("ip") and session.mirage_ip != pod_status["ip"]:
-                        session.mirage_ip = pod_status["ip"]
-                        session.pod_ip = pod_status["ip"]
-                        reconciled += 1
-            except Exception as e:
-                logger.error(
-                    f"Reconciliation: Failed to check pod {session.pod_name} "
-                    f"for session {session.id}: {e}"
-                )
-
-        if reconciled > 0:
-            await db.commit()
-
-        return reconciled
+        sessions = (await db.execute(select(GameSession).where(
+            GameSession.status.in_(ACTIVE_STATUSES)
+        ))).scalars().all()
+        count = 0
+        for session in sessions:
+            before = (session.status, session.mirage_ip)
+            await self._reconcile_single_session(db, session)
+            count += int(before != (session.status, session.mirage_ip))
+        return count
 
 
 session_service = SessionService()

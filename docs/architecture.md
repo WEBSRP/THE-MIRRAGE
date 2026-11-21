@@ -45,11 +45,11 @@ flowchart TD
     
     subgraph K3s_Cluster["k3s Single-Node Cluster"]
         subgraph Namespace["Namespace: mirrage-sessions"]
-            NetPol["NetworkPolicy: isolate-player-sessions\n(Ingress from 10.8.0.0/24 only)"]
+            NetPol["NetworkPolicy: isolate-player-sessions\n(Owner VPN /32 + expiring gateway lease)"]
             
             subgraph Pod["Per-Player Pod"]
-                MirageCont["Mirage Container\n(SSH Honeypot :22)"]
-                CTFCont["CTF Core Container\n(Challenge SSH :2222)"]
+                MirageCont["Mirage Container\n(SSH decoy :2222)"]
+                CTFCont["CTF Core Container\n(Challenge SSH :22, HTTP :80)"]
             end
         end
     end
@@ -65,9 +65,9 @@ flowchart TD
 2. **Cluster Routing**: The EC2 kernel routes traffic destined for the pod network (`10.42.0.0/16`) through the local container network interface bridge.
 3. **Session Provisioning**: When a challenge session is initiated via the API, the backend provisions a dedicated pod within the `mirrage-sessions` Kubernetes namespace.
 4. **Dual-Container Isolation**:
-   - **Mirage Honeypot (`port 22`)**: The initial SSH decoy container that logs attacker commands, simulates standard target environments, and provides clues.
-   - **CTF Core (`port 2222`)**: The target challenge container containing objectives, flags, and vulnerabilities discoverable through honeypot investigation.
-5. **Network Policy Enforcement**: A Kubernetes `NetworkPolicy` drops any traffic entering the pod from outside the `10.8.0.0/24` VPN subnet, completely blocking unauthorized cross-pod or internet-originating traffic.
+   - **Mirage SSH decoy (`port 2222`)**: An ordinary SSH environment; the advertised command-telemetry/deception pipeline remains separate work.
+   - **CTF Core (`SSH port 22, HTTP port 80`)**: The target challenge container containing objectives, flags, and vulnerabilities discoverable through honeypot investigation.
+5. **Access Enforcement**: A default-deny namespace policy, per-session owner `/32` policy and expiring gateway binding restrict access. See [player isolation](player-isolation.md) for deployment requirements and acceptance tests.
 
 ---
 
@@ -82,7 +82,7 @@ flowchart TD
 | **Public Ingress** | Cloudflare Tunnel (`cloudflared`) | AWS EC2 systemd service | Ingress tunnel exposing `api.themirrage.me` without opening inbound firewall ports on EC2. |
 | **Container Orchestration** | k3s (Lightweight Kubernetes) | AWS EC2 (Local node) | Manages container lifecycles in the `mirrage-sessions` namespace using custom security contexts. |
 | **VPN Gateway** | OpenVPN 2.x, Easy-RSA | AWS EC2 | Binds UDP 1194. Manages client authentication, subnet allocation (`10.8.0.0/24`), and routes to `10.42.0.0/16`. |
-| **Player Sandbox Pod** | Dual-container Pod (Mirage + CTF) | k3s Pod | Contains `mirage` (SSH port 22) and `ctf` (SSH port 2222) with dropped Linux capabilities (`ALL`). |
+| **Player Sandbox Pod** | Dual-container Pod (Mirage + CTF) | k3s Pod | Contains `mirage` (SSH 2222) and `ctf` (SSH 22, HTTP 80), pinned to the VPN gateway node. Capabilities are dropped and a subset is added for the exercise. |
 
 ---
 
@@ -120,7 +120,7 @@ The platform employs multi-tiered network segmentation to isolate administrative
 ### Subnet Allocations
 
 - **OpenVPN Subnet (`10.8.0.0/24`)**:
-  - Allocated dynamically to connected player workstations via OpenVPN pool.
+  - Reserved per certificate in the database and applied through OpenVPN client-specific configuration; no dynamic pool.
   - Gateway interface (`tun0`) resides at `10.8.0.1`.
   - Pushes route `10.42.0.0 255.255.0.0` to clients upon connection.
 - **k3s Pod CIDR (`10.42.0.0/16`)**:
@@ -132,12 +132,17 @@ The platform employs multi-tiered network segmentation to isolate administrative
 
 ### Ingress & Egress Restrictions (NetworkPolicy)
 
-All sandbox pods running in the `mirrage-sessions` namespace are governed by Kubernetes `NetworkPolicy` rules:
+The namespace policy denies ingress and egress by default. Each session gets an
+owner-specific `/32` policy for TCP 22, 80 and 2222; outbound connections are limited
+to that owner's configured callback ports. DNS/internet access is denied by default.
+The gateway independently filters VPN/pod address pairs, protects host services,
+blocks peer clients and closes leases at expiry. See [player-isolation.md](player-isolation.md)
+for the single-node/IPv4 scope, rollout, reboot/renewal behavior and required tests.
 
-- **Ingress Restrictions**:
-  - Only traffic originating from the VPN client CIDR (`10.8.0.0/24`) is permitted.
-  - Permitted ports: TCP port 22 (Mirage Honeypot SSH) and TCP port 2222 (CTF Challenge SSH).
-  - All other ingress traffic (including inter-pod and host-originating traffic not on the VPN subnet) is dropped.
-- **Egress Restrictions**:
-  - Pod egress is restricted to responses returning to `10.8.0.0/24` and internal DNS resolution on UDP/TCP port 53.
-  - Direct outbound egress to the EC2 host network, local cloud metadata endpoints, and the public internet is blocked.
+## Database migration lifecycle
+
+Alembic revisions in `backend/migrations/versions` define the database schema.
+Startup verifies the recorded migration head before seeding or worker cleanup;
+it does not create tables. Existing unversioned databases require checked adoption
+before explicit upgrade. See [database-migrations.md](database-migrations.md) for
+revision history, protected rollback and backup/recovery preparation.

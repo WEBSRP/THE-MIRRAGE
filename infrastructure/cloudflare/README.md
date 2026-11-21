@@ -54,3 +54,8 @@ http://127.0.0.1:8000 (FastAPI)
   if compromised.
 - cloudflared only connects outbound to Cloudflare — no inbound firewall
   rules are required for the API.
+
+For the visitor-IP trust contract, private origin bindings, required Uvicorn flag
+and shared OTP limits, see [OTP abuse controls](../../docs/otp-abuse-controls.md).
+The Nginx template expects this same-host tunnel and rejects absent/malformed
+Cloudflare visitor identities; review the runbook before applying it.

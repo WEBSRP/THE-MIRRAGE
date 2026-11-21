@@ -41,7 +41,7 @@ async def test_list_and_solve_challenge(async_client: AsyncClient, auth_headers:
         headers=auth_headers,
         json={
             "challenge_slug": "first-reflection",
-            "flag": "MIRRAGE{r3fl3ct10n_1s_n0t_r34l1ty_7f9a}",
+            "flag": "MIRRAGE{web_test_flag}",
         },
     )
     assert correct_sub.status_code == 200

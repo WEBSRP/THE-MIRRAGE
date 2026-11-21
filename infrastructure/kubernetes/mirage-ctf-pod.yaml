@@ -16,6 +16,13 @@ metadata:
     mirrage.io/user-id: user-template
 spec:
   restartPolicy: Never
+  automountServiceAccountToken: false
+  volumes:
+    - name: ctf-flags
+      secret:
+        # Replace with the immutable revision created by the backend provisioner.
+        secretName: REPLACE_WITH_FLAG_SECRET_NAME
+        defaultMode: 256 # 0400: root-readable only
   containers:
     # -------------------------------------------------------------
     # Container 1: Mirage Honeypot (Management SSH on Port 2222)
@@ -61,6 +68,10 @@ spec:
     # -------------------------------------------------------------
     - name: ctf-core
       image: mirrage/ctf-core:latest
+      volumeMounts:
+        - name: ctf-flags
+          mountPath: /run/mirrage-flags
+          readOnly: true
       ports:
         - containerPort: 22
           name: ctf-ssh

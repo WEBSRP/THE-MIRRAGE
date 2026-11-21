@@ -114,12 +114,12 @@ export function VerifyOtpPage() {
       />
       <form className="auth-form" onSubmit={handleSubmit}>
         {error ? (
-          <div className="auth-alert auth-alert-error">
+          <div className="auth-alert auth-alert-error" role="alert">
             <Icon name="info" size={16} />
             <span>{error}</span>
           </div>
         ) : (
-          <div className="auth-alert auth-alert-success">
+          <div className="auth-alert auth-alert-success" role="status">
             <Icon name="check" size={16} />
             <span>{notice}</span>
           </div>

@@ -1,8 +1,13 @@
 import asyncio
+import base64
+import hashlib
+import json
 import logging
 import os
 import random
+import re
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Dict, Any
 
@@ -10,12 +15,32 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
 from backend.app.core.config import settings
+from backend.app.core.flags import get_shared_flags
+from backend.app.services.session_resources import SessionInventory, identify_resource
+from backend.app.core.networking import (
+    DEFAULT_DENY_NAME, default_deny_policy, normalize_spec, player_network_policy,
+)
 
 logger = logging.getLogger(__name__)
 
 class KubernetesService(ABC):
     @abstractmethod
-    async def provision_player_pod(self, session_id: str, user_id: str, username: str) -> Tuple[str, str, str]:
+    async def list_session_resources(self) -> SessionInventory:
+        """List the configured namespace completely; partial reads must raise."""
+        pass
+
+    @abstractmethod
+    async def delete_session_resource(self, resource) -> bool:
+        """Delete only the observed UID/version and confirm its absence."""
+        pass
+
+    def pod_name(self, session_id: str) -> str:
+        if not re.fullmatch(r"[a-z0-9-]{1,100}", session_id):
+            raise ValueError("Invalid session identifier")
+        return f"player-{session_id}"
+
+    @abstractmethod
+    async def provision_player_pod(self, session_id: str, user_id: str, username: str, player_vpn_ip: Optional[str] = None) -> Tuple[str, str, str]:
         """Returns (pod_name, mirage_ip, ctf_ip)"""
         pass
     
@@ -28,40 +53,88 @@ class KubernetesService(ABC):
         pass
 
 class ProductionKubernetesService(KubernetesService):
-    def __init__(self):
-        loaded = False
-        kubeconfig_path = getattr(settings, "K8S_KUBECONFIG_PATH", None)
-        if kubeconfig_path:
-            kubeconfig_path = os.path.expanduser(kubeconfig_path)
-            if os.path.exists(kubeconfig_path):
-                try:
-                    config.load_kube_config(config_file=kubeconfig_path)
-                    loaded = True
-                except Exception as e:
-                    logger.warning(f"Could not load kubeconfig from {kubeconfig_path}: {e}")
-        if not loaded:
-            for default_path in [os.path.expanduser("~/.kube/config"), "/etc/rancher/k3s/k3s.yaml"]:
-                if os.path.exists(default_path):
-                    try:
-                        config.load_kube_config(config_file=default_path)
-                        loaded = True
+    async def list_session_resources(self):
+        def inventory():
+            resources, occupied, ignored = [], set(), 0
+            api = client.ApiClient()
+            for kind, listing in (("Pod", self.core_v1.list_namespaced_pod),
+                                  ("NetworkPolicy", self.networking_v1.list_namespaced_network_policy)):
+                token = None
+                while True:
+                    page = listing(namespace=self.namespace, limit=200, _continue=token,
+                                   _request_timeout=(3, 10))
+                    for item in page.items:
+                        data = api.sanitize_for_serialization(item)
+                        metadata = data.get("metadata") or {}
+                        ip = (data.get("status") or {}).get("podIP") if kind == "Pod" else None
+                        if ip:
+                            occupied.add(ip)  # Include unrelated/ambiguous pods when retaining source blocks.
+                        resource = (identify_resource(kind, metadata, self.pod_name, ip)
+                                    if metadata.get("namespace") == self.namespace else None)
+                        if resource:
+                            resources.append(resource)
+                        else:
+                            ignored += 1
+                    token = page.metadata._continue
+                    if not token:
                         break
-                    except Exception:
-                        pass
-        if not loaded:
+            return SessionInventory(tuple(resources), frozenset(occupied), ignored)
+        return await asyncio.to_thread(inventory)
+
+    async def delete_session_resource(self, resource):
+        if resource.kind == "Pod":
+            read, delete = self.core_v1.read_namespaced_pod, self.core_v1.delete_namespaced_pod
+        elif resource.kind == "NetworkPolicy":
+            read = self.networking_v1.read_namespaced_network_policy
+            delete = self.networking_v1.delete_namespaced_network_policy
+        else:
+            return False
+        try:
             try:
-                config.load_incluster_config()
-                loaded = True
-            except config.ConfigException:
-                pass
-        if not loaded:
+                current = await asyncio.to_thread(read, name=resource.name, namespace=self.namespace,
+                                                  _request_timeout=(3, 10))
+            except ApiException as error:
+                if error.status == 404:
+                    return True
+                raise
+            data = client.ApiClient().sanitize_for_serialization(current)
+            metadata = data.get("metadata") or {}
+            observed = identify_resource(resource.kind, metadata, self.pod_name, resource.pod_ip)
+            if metadata.get("namespace") != self.namespace or observed != resource:
+                return False  # Changed labels, UID or version: rescan; never delete a replacement.
+            options = client.V1DeleteOptions(preconditions=client.V1Preconditions(
+                uid=resource.uid, resource_version=resource.resource_version,
+            ), grace_period_seconds=30 if resource.kind == "Pod" else None)
             try:
-                config.load_kube_config()
-                loaded = True
-            except config.ConfigException:
-                logger.warning("Could not load Kubernetes configuration. K8s features will fail.")
-        
+                await asyncio.to_thread(delete, name=resource.name, namespace=self.namespace,
+                                        body=options, _request_timeout=(3, 10))
+            except ApiException as error:
+                if error.status == 404:
+                    return True
+                raise
+            for _ in range(20):
+                try:
+                    await asyncio.to_thread(read, name=resource.name, namespace=self.namespace,
+                                            _request_timeout=(3, 10))
+                except ApiException as error:
+                    if error.status == 404:
+                        return True
+                    raise
+                await asyncio.sleep(0.25)
+            return False
+        except ApiException:
+            logger.warning("Conditional resource cleanup pending: %s", resource.name)
+            return False
+
+    def __init__(self):
+        # Never fall back to the node's cluster-admin credentials when the
+        # configured controller identity is missing or invalid.
+        if settings.K8S_IN_CLUSTER:
+            config.load_incluster_config()
+        else:
+            config.load_kube_config(config_file=os.path.expanduser(settings.K8S_KUBECONFIG_PATH))
         self.core_v1 = client.CoreV1Api()
+        self.networking_v1 = client.NetworkingV1Api()
         self.namespace = settings.K8S_NAMESPACE
 
     def _ensure_namespace_and_sa(self):
@@ -106,9 +179,82 @@ class ProductionKubernetesService(KubernetesService):
             else:
                 raise
     
-    async def provision_player_pod(self, session_id: str, user_id: str, username: str) -> Tuple[str, str, str]:
+    def _ensure_network_boundary(self) -> None:
+        """Reject additive broad permissions instead of silently trusting /32 rules."""
+        existing = self.networking_v1.list_namespaced_network_policy(namespace=self.namespace).items
+        found_default = False
+        for policy in existing:
+            serialized = client.ApiClient().sanitize_for_serialization(policy)
+            meta = serialized["metadata"]
+            if meta["name"] == DEFAULT_DENY_NAME:
+                expected = default_deny_policy()
+                found_default = True
+            else:
+                labels = meta.get("labels") or {}
+                annotations = meta.get("annotations") or {}
+                if labels.get("mirrage.io/purpose") != "player-access" or not meta["name"].startswith("access-"):
+                    raise RuntimeError("Unexpected NetworkPolicy: remove broad permissions before provisioning")
+                try:
+                    expected = player_network_policy(
+                        meta["name"][7:], labels["mirrage.io/session-id"],
+                        labels["mirrage.io/user-id"], annotations["mirrage.io/vpn-ip"],
+                    )
+                except (KeyError, ValueError):
+                    raise RuntimeError("Invalid player NetworkPolicy") from None
+            if normalize_spec(serialized["spec"]) != normalize_spec(expected["spec"]):
+                raise RuntimeError("Unsafe NetworkPolicy: apply the default-deny/session policy migration first")
+        if not found_default:
+            try:
+                self.networking_v1.create_namespaced_network_policy(namespace=self.namespace, body=default_deny_policy())
+            except ApiException as error:
+                if error.status != 409:
+                    raise
+                # Another worker installed it. Re-read and verify, never assume.
+                self._ensure_network_boundary()
+
+    def _create_player_policy(self, pod_name, session_id, user_id, vpn_ip):
+        desired = player_network_policy(pod_name, session_id, user_id, vpn_ip)
+        self.networking_v1.create_namespaced_network_policy(namespace=self.namespace, body=desired)
+
+    def _ensure_flags_secret(self) -> str:
+        """Immutable revision, shared across players; never put flags in pod env."""
+        flags = get_shared_flags()
+        content = json.dumps(flags, sort_keys=True, separators=(",", ":"))
+        revision = hashlib.sha256(content.encode()).hexdigest()[:24]
+        name = f"mirrage-ctf-flags-{revision}"
+        try:
+            existing = self.core_v1.read_namespaced_secret(name=name, namespace=self.namespace)
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+            body = client.V1Secret(
+                metadata=client.V1ObjectMeta(name=name, labels={"mirrage.io/purpose": "ctf-flags"}),
+                type="Opaque", immutable=True, string_data={"flags.json": content},
+            )
+            try:
+                self.core_v1.create_namespaced_secret(namespace=self.namespace, body=body)
+                return name
+            except ApiException as create_exc:
+                if create_exc.status != 409:
+                    # Do not surface an API error body that might include submitted data.
+                    raise RuntimeError("Cannot create CTF flag Secret") from None
+                existing = self.core_v1.read_namespaced_secret(name=name, namespace=self.namespace)
+        try:
+            actual = json.loads(base64.b64decode(existing.data["flags.json"]).decode())
+        except (KeyError, TypeError, ValueError, UnicodeError):
+            raise RuntimeError("Invalid CTF flag Secret") from None
+        if actual != flags:
+            raise RuntimeError("CTF flag Secret does not match configured verifiers")
+        return name
+
+    async def provision_player_pod(self, session_id: str, user_id: str, username: str, player_vpn_ip: Optional[str] = None) -> Tuple[str, str, str]:
+        if player_vpn_ip is None:
+            raise ValueError("A reserved VPN IP is required before provisioning")
+        pod_name = self.pod_name(session_id)
         self._ensure_namespace_and_sa()
-        pod_name = f"player-{session_id.lower()}-{int(time.time())}"
+        await asyncio.to_thread(self._ensure_network_boundary)
+        flags_secret = await asyncio.to_thread(self._ensure_flags_secret)
+        await asyncio.to_thread(self._create_player_policy, pod_name, session_id, user_id, player_vpn_ip)
         
         container_security_context = client.V1SecurityContext(
             allow_privilege_escalation=False,
@@ -173,6 +319,9 @@ class ProductionKubernetesService(KubernetesService):
             ),
             security_context=container_security_context,
             readiness_probe=ctf_readiness,
+            volume_mounts=[client.V1VolumeMount(
+                name="ctf-flags", mount_path="/run/mirrage-flags", read_only=True
+            )],
             ports=[
                 client.V1ContainerPort(container_port=22, name="ctf-ssh"),
                 client.V1ContainerPort(container_port=80, name="ctf-http")
@@ -191,7 +340,11 @@ class ProductionKubernetesService(KubernetesService):
                 }
             ),
             spec=client.V1PodSpec(
+                node_name=settings.K8S_SESSION_NODE_NAME or None,
                 containers=[mirage_container, ctf_container],
+                volumes=[client.V1Volume(name="ctf-flags", secret=client.V1SecretVolumeSource(
+                    secret_name=flags_secret, default_mode=0o400
+                ))],
                 restart_policy="Never",
                 service_account_name="mirrage-player-sandbox",
                 automount_service_account_token=False,
@@ -203,48 +356,60 @@ class ProductionKubernetesService(KubernetesService):
         )
         
         try:
-            self.core_v1.create_namespaced_pod(namespace=self.namespace, body=pod)
-            logger.info(f"Created pod {pod_name} in namespace {self.namespace}")
-        except ApiException as e:
-            logger.error(f"Exception when creating pod: {e}")
+            created = self.core_v1.create_namespaced_pod(namespace=self.namespace, body=pod)
+            uid = getattr(getattr(created, "metadata", None), "uid", None)
+            if isinstance(uid, str) and uid:
+                self.networking_v1.patch_namespaced_network_policy(
+                    name=f"access-{pod_name}", namespace=self.namespace,
+                    body={"metadata": {"ownerReferences": [{"apiVersion": "v1", "kind": "Pod",
+                           "name": pod_name, "uid": uid}]}},
+                )
+            for _ in range(60):
+                current = self.core_v1.read_namespaced_pod(name=pod_name, namespace=self.namespace)
+                if current.status.phase in ("Failed", "Unknown"):
+                    raise RuntimeError("Player pod entered a terminal phase")
+                statuses = current.status.container_statuses or []
+                ready = any(c.type == "Ready" and c.status == "True" for c in current.status.conditions or [])
+                if (current.status.phase == "Running" and current.status.pod_ip and ready
+                        and len(statuses) >= 2 and all(status.ready for status in statuses)):
+                    return pod_name, current.status.pod_ip, current.status.pod_ip
+                await asyncio.sleep(2)
+            raise TimeoutError("Player pod did not become ready in time")
+        except BaseException:
+            # Deterministic identity is also persisted by SessionService for retries.
+            await asyncio.shield(self.delete_player_pod(pod_name))
             raise
 
-        for _ in range(60):
-            try:
-                current_pod = self.core_v1.read_namespaced_pod(name=pod_name, namespace=self.namespace)
-                phase = current_pod.status.phase
-                pod_ip = current_pod.status.pod_ip
-                if phase == "Running" and pod_ip:
-                    conditions = current_pod.status.conditions or []
-                    ready_cond = any(c.type == "Ready" and c.status == "True" for c in conditions)
-                    c_statuses = current_pod.status.container_statuses or []
-                    all_c_ready = len(c_statuses) >= 2 and all(cs.ready for cs in c_statuses)
-
-                    if ready_cond and all_c_ready:
-                        logger.info(f"Pod {pod_name} is running and ready with IP {pod_ip}")
-                        return pod_name, pod_ip, pod_ip
-                elif phase in ("Failed", "Unknown"):
-                    raise RuntimeError(f"Pod {pod_name} entered terminal phase: {phase}")
-                await asyncio.sleep(2)
-            except ApiException as e:
-                logger.error(f"Error checking pod status: {e}")
-                await asyncio.sleep(2)
-        
-        raise TimeoutError(f"Pod {pod_name} did not become ready in time.")
-    
     async def delete_player_pod(self, pod_name: str) -> bool:
         try:
-            self.core_v1.delete_namespaced_pod(
-                name=pod_name, 
-                namespace=self.namespace,
-                body=client.V1DeleteOptions(grace_period_seconds=0)
-            )
-            logger.info(f"Deleted pod {pod_name}")
+            try:
+                self.core_v1.delete_namespaced_pod(
+                    name=pod_name, namespace=self.namespace,
+                    body=client.V1DeleteOptions(grace_period_seconds=30),
+                )
+            except ApiException as error:
+                if error.status != 404:
+                    raise
+            for _ in range(20):
+                try:
+                    self.core_v1.read_namespaced_pod(name=pod_name, namespace=self.namespace)
+                except ApiException as error:
+                    if error.status == 404:
+                        break
+                    raise
+                await asyncio.sleep(0.25)
+            else:
+                return False
+            try:
+                self.networking_v1.delete_namespaced_network_policy(
+                    name=f"access-{pod_name}", namespace=self.namespace,
+                )
+            except ApiException as error:
+                if error.status != 404:
+                    raise
             return True
-        except ApiException as e:
-            if e.status == 404:
-                return True
-            logger.error(f"Exception when deleting pod: {e}")
+        except ApiException:
+            logger.error("Unable to confirm player pod/policy removal: %s", pod_name)
             return False
 
     async def get_pod_status(self, pod_name: str) -> Optional[dict]:
@@ -277,22 +442,59 @@ class ProductionKubernetesService(KubernetesService):
 
 
 class MockKubernetesService(KubernetesService):
+    def pod_name(self, session_id: str) -> str:
+        return "mock-" + super().pod_name(session_id)
+
     simulate_creation_failure: bool = False
     simulate_readiness_timeout: bool = False
     simulate_deletion_failure: bool = False
 
     def __init__(self):
         self.pods: Dict[str, Dict[str, Any]] = {}
+        self.policies = {}
         self._next_ip = 10
+
+    def _mock_metadata(self, name, labels):
+        return {"name": name, "namespace": settings.K8S_NAMESPACE, "labels": dict(labels),
+                "uid": str(uuid.uuid4()), "resourceVersion": "1"}
+
+    async def list_session_resources(self):
+        resources, occupied, ignored = [], set(), 0
+        for kind, entries in (("Pod", self.pods), ("NetworkPolicy", self.policies)):
+            for name, data in entries.items():
+                ip = data.get("ip") if kind == "Pod" else None
+                if ip:
+                    occupied.add(ip)
+                resource = identify_resource(kind, data.get("metadata") or {}, self.pod_name, ip)
+                if resource:
+                    resources.append(resource)
+                else:
+                    ignored += 1
+        return SessionInventory(tuple(resources), frozenset(occupied), ignored)
+
+    async def delete_session_resource(self, resource):
+        if self.simulate_deletion_failure:
+            return False
+        entries = self.pods if resource.kind == "Pod" else self.policies
+        data = entries.get(resource.name)
+        if data is None:
+            return True
+        current = identify_resource(resource.kind, data.get("metadata") or {}, self.pod_name,
+                                    data.get("ip") if resource.kind == "Pod" else None)
+        if current != resource:
+            return False
+        del entries[resource.name]
+        return True
     
-    async def provision_player_pod(self, session_id: str, user_id: str, username: str) -> Tuple[str, str, str]:
+    async def provision_player_pod(self, session_id: str, user_id: str, username: str, player_vpn_ip: Optional[str] = None) -> Tuple[str, str, str]:
         if self.simulate_creation_failure:
             raise RuntimeError("Simulated creation failure")
             
-        pod_name = f"mock-player-{session_id.lower()}-{int(time.time())}"
+        pod_name = self.pod_name(session_id)
         
         self.pods[pod_name] = {
             "phase": "Creating",
+            "player_vpn_ip": player_vpn_ip,
             "ip": None,
             "ready": False,
             "start_time": time.time(),
@@ -306,6 +508,10 @@ class MockKubernetesService(KubernetesService):
             "session_id": str(session_id),
             "user_id": str(user_id),
         }
+        labels = self.pods[pod_name]["labels"]
+        self.pods[pod_name]["metadata"] = self._mock_metadata(pod_name, labels)
+        self.policies["access-" + pod_name] = {"metadata": self._mock_metadata(
+            "access-" + pod_name, {**labels, "mirrage.io/purpose": "player-access"})}
         
         # Simulate network delay
         await asyncio.sleep(random.uniform(0.3, 0.5))
@@ -334,6 +540,7 @@ class MockKubernetesService(KubernetesService):
         # Simulate network delay
         await asyncio.sleep(random.uniform(0.1, 0.2))
         
+        self.policies.pop("access-" + pod_name, None)
         if pod_name in self.pods:
             self.pods[pod_name]["phase"] = "Terminated"
             self.pods[pod_name]["ready"] = False

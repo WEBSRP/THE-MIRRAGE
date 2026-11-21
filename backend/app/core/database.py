@@ -41,6 +41,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize database tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Check migration state; application startup never mutates the schema."""
+    from backend.app.core.migrations import require_current_schema
+    async with engine.connect() as conn:
+        await conn.run_sync(require_current_schema)

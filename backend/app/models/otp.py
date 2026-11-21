@@ -47,7 +47,7 @@ class OtpCode(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 

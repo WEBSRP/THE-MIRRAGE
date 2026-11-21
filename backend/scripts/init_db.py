@@ -2,6 +2,8 @@
 import asyncio
 import backend.app.models
 import logging
+from alembic import command
+from backend.app.core.migrations import migration_config
 from backend.app.core.database import AsyncSessionLocal, init_db
 from backend.app.services.challenge_service import challenge_service
 
@@ -10,9 +12,10 @@ logger = logging.getLogger("mirrage.init_db")
 
 
 async def main():
-    logger.info("Initializing MIRRAGE database schema...")
+    logger.info("Applying explicit MIRRAGE database migrations...")
+    await asyncio.to_thread(command.upgrade, migration_config(), "head")
     await init_db()
-    logger.info("Database schema initialized.")
+    logger.info("Database migration revision verified.")
 
     logger.info("Seeding default challenges...")
     async with AsyncSessionLocal() as db:

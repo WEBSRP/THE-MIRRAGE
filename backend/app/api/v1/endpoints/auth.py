@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 from backend.app.api.deps import get_current_user, get_db
@@ -7,6 +7,10 @@ from backend.app.models.user import User
 from backend.app.schemas.user import UserOut
 from backend.app.schemas.otp import OtpRequest, OtpResend, OtpResponse, OtpTokenResponse, OtpVerify
 from backend.app.services.auth_service import auth_service
+from backend.app.core.client_address import otp_client_address
+
+OTP_PUBLIC_LIMIT_ERRORS = {"OTP_RATE_LIMIT", "OTP_COOLDOWN", "OTP_IP_RATE_LIMIT", "OTP_EMAIL_BUDGET",
+                           "OTP_THROTTLE_UNAVAILABLE", "OTP_CLIENT_ADDRESS_UNAVAILABLE", "OTP_EMAIL_UNAVAILABLE"}
 
 logger = logging.getLogger("mirrage.auth")
 
@@ -32,6 +36,7 @@ async def get_me(
 )
 async def request_otp_endpoint(
     data: OtpRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -40,14 +45,16 @@ async def request_otp_endpoint(
     """
     resend_after = 60
     try:
-        resend_after = await auth_service.request_otp(db=db, email=data.email)
+        resend_after = await auth_service.request_otp(db=db, email=data.email, client_address=otp_client_address(request))
     except MirrageException as e:
         # Re-raise rate limit errors (these don't reveal email existence)
-        if e.code in ("OTP_RATE_LIMIT", "OTP_COOLDOWN"):
+        if e.code in OTP_PUBLIC_LIMIT_ERRORS:
             raise
         logger.error("OTP request failed with MirrageException: %s", e.code)
+        raise MirrageException(503, "OTP requests are temporarily unavailable", "OTP_EMAIL_UNAVAILABLE") from None
     except Exception:
-        logger.exception("OTP request failed unexpectedly")
+        logger.error("OTP request failed unexpectedly; no diagnostic payload retained")
+        raise MirrageException(503, "OTP requests are temporarily unavailable", "OTP_EMAIL_UNAVAILABLE") from None
     return OtpResponse(message="If this email can receive an OTP, a verification code has been sent.", resend_after_seconds=resend_after)
 
 
@@ -75,6 +82,7 @@ async def verify_otp_endpoint(
 )
 async def resend_otp_endpoint(
     data: OtpResend,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -82,12 +90,14 @@ async def resend_otp_endpoint(
     Enforces cooldown and rate limiting.
     """
     try:
-        await auth_service.resend_otp(db=db, email=data.email)
+        await auth_service.resend_otp(db=db, email=data.email, client_address=otp_client_address(request))
     except MirrageException as e:
         # Re-raise rate limit/cooldown errors (these don't reveal email existence)
-        if e.code in ("OTP_COOLDOWN", "OTP_RATE_LIMIT"):
+        if e.code in OTP_PUBLIC_LIMIT_ERRORS:
             raise
         logger.error("OTP resend failed with MirrageException: %s", e.code)
+        raise MirrageException(503, "OTP requests are temporarily unavailable", "OTP_EMAIL_UNAVAILABLE") from None
     except Exception:
-        logger.exception("OTP resend failed unexpectedly")
+        logger.error("OTP resend failed unexpectedly; no diagnostic payload retained")
+        raise MirrageException(503, "OTP requests are temporarily unavailable", "OTP_EMAIL_UNAVAILABLE") from None
     return OtpResponse(message="If this email can receive an OTP, a new verification code has been sent.", resend_after_seconds=60)

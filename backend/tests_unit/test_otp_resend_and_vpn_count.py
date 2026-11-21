@@ -24,9 +24,12 @@ async def test_immediate_resend_is_single_use_and_cannot_bypass_cooldown():
         record.is_used = False
         records.append(record)
     db = Mock(bind=SimpleNamespace(dialect=SimpleNamespace(name='sqlite')),
-              execute=AsyncMock(side_effect=execute), add=Mock(side_effect=add), commit=AsyncMock())
+              execute=AsyncMock(side_effect=execute), add=Mock(side_effect=add), commit=AsyncMock(), rollback=AsyncMock())
     service = AuthService()
-    with patch('backend.app.services.auth_service.email_service.send_otp', new_callable=AsyncMock) as send:
+    with patch('backend.app.services.auth_service.email_service.send_otp', new_callable=AsyncMock) as send, \
+         patch('backend.app.services.auth_service.otp_abuse_limiter.reserve_delivery', new_callable=AsyncMock), \
+         patch('backend.app.services.auth_service.email_health.begin', new_callable=AsyncMock), \
+         patch('backend.app.services.auth_service.email_health.finish', new_callable=AsyncMock):
         assert await service.request_otp(db, 'player@example.com') == 0
         # Concurrent clicks can consume the immediate resend only once.
         results = await asyncio.gather(*(service.resend_otp(db, 'player@example.com') for _ in range(3)), return_exceptions=True)
@@ -55,7 +58,7 @@ async def test_immediate_resend_is_single_use_and_cannot_bypass_cooldown():
 @pytest.mark.asyncio
 async def test_vpn_count_tracks_other_clients_without_returning_their_details():
     profile = SimpleNamespace(client_name='my-client', revoked_at=None, is_connected=False,
-                              assigned_ip=None, bytes_received=0, bytes_sent=0,
+                              assigned_ip='10.8.0.10', bytes_received=0, bytes_sent=0,
                               connected_since=None, last_seen_at=None)
     service = ProductionVPNService()
     service.generate_or_get_profile = AsyncMock(return_value=profile)
