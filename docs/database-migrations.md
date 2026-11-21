@@ -23,6 +23,17 @@ Alembic configuration is `backend/alembic.ini`. Frozen schema definitions live i
 | `20261120_0004` | Durable VPN revocations and CRL maintenance |
 | `20261120_0005` | Per-IP OTP request counters and global email budgets |
 | `20261120_0006` | Private operational email provider health metadata |
+| `20261121_0007` | Per-session VPN download count, initialized to zero for existing sessions |
+
+Live update (21 November 2026): RDS is at `20261121_0007`. The migration committed
+in one transaction after checking the previous revision, and verification confirmed
+that every existing session was preserved with a zero download count. The deployed
+backend shares a three-download quota between `/vpn/profile` and `/vpn/download`
+and requires a healthy session after its countdown. Direct, private origin and
+public API checks returned HTTP 200 with a healthy database. Both credential
+routes returned HTTP 401 when unauthenticated. Authenticated download behavior
+was tested on disposable databases. The frontend changes still await the user's
+Vercel deployment from `main`.
 
 Application startup now checks that the database is at the code's migration head.
 It does not call `create_all`, run DDL, or automatically stamp a legacy database.
@@ -49,7 +60,7 @@ backend/.venv/bin/python -m backend.scripts.migrate upgrade
 backend/.venv/bin/python -m backend.scripts.migrate status
 ```
 
-`upgrade` defaults to `head`; status should report `current` at `20261120_0006`.
+`upgrade` defaults to `head`; status should report `current` at `20261121_0007`.
 The status operation reads revision state and does not initialize tables. Start
 the backend normally afterward; challenge seeding/data sanitization occurs there.
 The existing explicit initialization helper also applies migrations before seeding:
@@ -78,7 +89,7 @@ backend/.venv/bin/python -m backend.scripts.migrate status
 recording its revision. It checks table sets, columns/types/nullability/defaults,
 indexes/unique keys, foreign keys, primary keys and native PostgreSQL enum labels.
 It changes only migration tracking; it does not recreate tables or transform data.
-A database already containing all current tables can be adopted at `0006`; a
+A database already containing the full current schema can be adopted at `0007`; a
 baseline database adopts `0001` and gets the additive changes through upgrade.
 
 Unknown/partial layouts, altered constraints, extra tables and pre-baseline schemas

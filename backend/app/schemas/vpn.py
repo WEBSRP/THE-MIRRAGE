@@ -23,6 +23,7 @@ class VpnStatusOut(BaseModel):
     bytes_sent: int
     connected_since: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
     indicator: str  # "connected" | "disconnected" | "standby"
 
 
@@ -30,6 +31,7 @@ class VpnDownloadOut(BaseModel):
     filename: str
     config_data: str
     client_ip: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
 class VpnRevokeResponse(BaseModel):

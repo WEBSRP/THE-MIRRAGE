@@ -1,6 +1,7 @@
 """Persistent address allocation and private OpenVPN client configuration."""
 import asyncio
 import ipaddress
+import json
 import os
 from pathlib import Path
 import re
@@ -90,13 +91,21 @@ async def reserve_address(db, user_id: str, client_name: str) -> str:
         raise VpnConfigurationError("VPN address pool is full")
 
 
-def write_client_config(client_name: str, address: str) -> None:
+def write_client_config(client_name: str, address: str, *, certificate=None) -> None:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", client_name):
         raise ValueError("Invalid VPN client name")
     address = validate_player_ip(address)
     directory = Path(settings.OPENVPN_CCD_DIR)
     netmask = ipaddress.IPv4Network(settings.VPN_CLIENT_CIDR).netmask
     content = f"ifconfig-push {address} {netmask}\n"
+    if certificate is not None:
+        from backend.app.services.vpn_credentials import PROFILE_SECONDS
+        validity = (certificate.expires_at - certificate.issued_at).total_seconds()
+        if not 0 < validity <= PROFILE_SECONDS:
+            raise ValueError("VPN certificate exceeds 24-hour policy")
+        binding = dict(issued_at=int(certificate.issued_at.timestamp()),
+                       expires_at=int(certificate.expires_at.timestamp()), serial=certificate.serial)
+        content += "# mirrage-profile-v1 " + json.dumps(binding, sort_keys=True) + "\n"
     directory.mkdir(mode=0o750, parents=True, exist_ok=True)
     destination = directory / client_name
     if (destination.is_file() and not destination.is_symlink()

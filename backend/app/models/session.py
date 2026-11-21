@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import enum
 import uuid
 from typing import TYPE_CHECKING, List, Optional
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.core.database import Base
 
@@ -60,6 +60,8 @@ class GameSession(Base):
     # Ports (CTF port 22 for player access; Mirage port 2222 for management access)
     mirage_port: Mapped[int] = mapped_column(Integer, default=2222, nullable=False)
     ctf_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
+
+    vpn_download_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     # Lifecycle & Timestamps
     created_at: Mapped[datetime] = mapped_column(

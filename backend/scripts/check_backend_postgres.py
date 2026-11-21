@@ -34,6 +34,12 @@ try:
     env.update(ENV_FILE=str(socket_dir / 'no.env'), ENVIRONMENT='testing',
                SECRET_KEY='test-only-key-minimum-length-for-local-tests-123',
                OTP_HMAC_SECRET='test-only-otp-key-minimum-length-local-tests-123',
+               EASYRSA_DIR=str(socket_dir / 'no-pki'),
+               EASYRSA_CA_CERT=str(socket_dir / 'no-ca.crt'),
+               EASYRSA_TLS_KEY=str(socket_dir / 'no-tls.key'),
+               VPN_CA_PASSPHRASE_FILE=str(socket_dir / 'no-passphrase'),
+               VPN_CONTROL_HELPER='/nonexistent/mirrage-vpn-control',
+               SESSION_GATEWAY_HELPER='/nonexistent/mirrage-session-access',
                K8S_MODE='mock', VPN_MODE='mock', DATABASE_URL='sqlite+aiosqlite:///:memory:',
                PYTHONPATH='.', MIRRAGE_TEST_POSTGRES_URL=f'postgresql+asyncpg://postgres@/postgres?host={socket_dir}')
     targets = sys.argv[1:] or ['backend/tests', 'backend/tests_unit']

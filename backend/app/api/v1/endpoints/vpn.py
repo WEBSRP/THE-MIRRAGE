@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,9 @@ from backend.app.schemas.vpn import VpnCrlHealthOut, VpnDownloadOut, VpnStatusOu
 from backend.app.models.vpn import VpnCrlMaintenance
 from backend.app.services.vpn_revocation import vpn_revocation_service
 from backend.app.services.vpn_service import vpn_service
+from backend.app.services.session_service import session_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vpn", tags=["OpenVPN & Connectivity"])
 
@@ -30,6 +34,18 @@ async def get_vpn_status(
     return await vpn_service.get_vpn_status(db=db, user=current_user)
 
 
+async def _download_profile(db: AsyncSession, user: User) -> VpnDownloadOut:
+    session_id = await session_service.consume_vpn_download(db, user.id)
+    try:
+        return await vpn_service.get_download_profile(db=db, user=user)
+    except Exception:
+        try:
+            await session_service.refund_vpn_download(db, session_id)
+        except Exception:
+            logger.error("Could not refund a failed VPN download")
+        raise
+
+
 @router.get(
     "/profile",
     response_model=VpnDownloadOut,
@@ -42,7 +58,7 @@ async def get_vpn_profile(
 ):
     """Retrieve the player's full OpenVPN profile configuration and metadata."""
     response.headers["Cache-Control"] = "no-store"
-    return await vpn_service.get_download_profile(db=db, user=current_user)
+    return await _download_profile(db, current_user)
 
 
 @router.get(
@@ -56,7 +72,7 @@ async def download_ovpn_file(
     """
     Directly download the player's unique .ovpn client profile file as an attachment.
     """
-    profile_data = await vpn_service.get_download_profile(db=db, user=current_user)
+    profile_data = await _download_profile(db, current_user)
     return Response(
         content=profile_data.config_data,
         media_type="application/x-openvpn-profile",

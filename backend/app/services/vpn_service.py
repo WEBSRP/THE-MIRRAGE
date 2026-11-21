@@ -53,51 +53,90 @@ class ProductionVPNService(VPNService):
         self._profile_lock = asyncio.Lock()
 
     async def generate_or_get_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> VpnProfile:
+        from pathlib import Path
+        import secrets
+        from backend.app.models.vpn import VpnAddressReservation
         from backend.app.services.vpn_access import reserve_address, write_client_config
+        from backend.app.services.vpn_credentials import certificate_details
+        from backend.app.services.vpn_control import vpn_control
         from backend.app.services.vpn_provisioner import (
-            create_client_certificate, build_ovpn_profile, generate_client_name, VPNProvisionerError,
+            create_client_certificate, build_ovpn_profile, generate_client_name,
+            revoke_client_certificate, VPNProvisionerError,
         )
         async with self._profile_lock:
             await require_vpn_access(db, user.id)
-            prior = (await db.execute(select(VpnProfile).where(
-                VpnProfile.user_id == user.id
-            ))).scalars().first()
-            if prior and prior.revoked_at is not None:
-                raise VpnConfigurationError("VPN profile is revoked; contact an administrator")
-            client_name = (prior.client_name if prior and not prior.client_name.startswith("mock-")
-                           else generate_client_name(user.id))
-            address = await reserve_address(db, user.id, client_name)
             if db.bind.dialect.name == "postgresql":
-                # Easy-RSA updates one shared PKI index; serialize across API workers.
+                # Serialize before reading the certificate/address binding. The
+                # allocation may commit, so reacquire below before locking the user.
+                await db.execute(text("SELECT pg_advisory_xact_lock(74291825)"))
+            prior = (await db.execute(select(VpnProfile).where(VpnProfile.user_id == user.id))).scalars().first()
+            reserved_name = (prior.client_name if prior and not prior.client_name.startswith("mock-")
+                             else generate_client_name(user.id))
+            # Allocation commits before certificate work; failures retain the address.
+            address = await reserve_address(db, user.id, reserved_name)
+            if db.bind.dialect.name == "postgresql":
                 await db.execute(text("SELECT pg_advisory_xact_lock(74291825)"))
             await require_vpn_access(db, user.id, lock=True)
             profile = (await db.execute(select(VpnProfile).where(
                 VpnProfile.user_id == user.id
             ).with_for_update().execution_options(populate_existing=True))).scalars().first()
-            if profile and profile.revoked_at is not None:
-                raise VpnConfigurationError("VPN profile is revoked; contact an administrator")
+            reservation = (await db.execute(select(VpnAddressReservation).where(
+                VpnAddressReservation.user_id == user.id
+            ).with_for_update().execution_options(populate_existing=True))).scalar_one()
+            old_certificate = None
+            if profile and not profile.client_name.startswith("mock-"):
+                try:
+                    old_certificate = certificate_details(profile.config_data, profile.client_name)
+                except ValueError:
+                    pass
+            rotate = old_certificate is None or not old_certificate.usable()
+            created_name = None
             try:
-                if profile is None or profile.client_name.startswith("mock-"):
-                    await create_client_certificate(client_name)
-                    config_data = build_ovpn_profile(client_name)
+                if rotate:
+                    # Fresh identity/key per issuance; never overwrite an old certificate
+                    # or remove the account's permanent administrator-deny records.
+                    new_name = generate_client_name(user.id)[:47] + "-" + secrets.token_hex(8)
+                    await create_client_certificate(new_name)
+                    config_data = build_ovpn_profile(new_name)
+                    certificate = certificate_details(config_data, new_name)
+                    if not certificate.usable():
+                        raise ValueError("New VPN certificate violates expiry policy")
+                    config_data = ("# MIRRAGE VPN expires at " + certificate.expires_at.isoformat()
+                                   + " (24 hours after issuance)\n" + config_data)
+                    if profile and not profile.client_name.startswith("mock-"):
+                        await vpn_control.block(profile.client_name,
+                                                public_certificate=old_certificate.pem if old_certificate else None)
+                        await revoke_client_certificate(profile.client_name)
+                        await vpn_control.publish(profile.client_name)
                     if profile is None:
-                        profile = VpnProfile(user_id=user.id, client_name=client_name,
+                        profile = VpnProfile(user_id=user.id, client_name=new_name,
                                              config_data=config_data, is_connected=False)
                         db.add(profile)
                     else:
-                        profile.client_name = client_name
+                        profile.client_name = new_name
                         profile.config_data = config_data
                         profile.is_connected = False
-                if profile.client_name != client_name:
-                    raise VpnConfigurationError("VPN certificate identity mismatch")
-                await asyncio.to_thread(write_client_config, client_name, address)
-            except (VPNProvisionerError, OSError, ValueError):
-                logger.error("Cannot provision private VPN configuration for user %s", user.id)
-                raise VpnConfigurationError("Cannot provision VPN address/configuration") from None
-            if profile.assigned_ip != address:
-                profile.is_connected = False
-            profile.assigned_ip = address
-            await db.commit()
+                        profile.connected_since = None
+                    reservation.client_name = new_name
+                    created_name = new_name
+                else:
+                    certificate = old_certificate
+                    if reservation.client_name != profile.client_name:
+                        raise ValueError("VPN reservation identity mismatch")
+                await asyncio.to_thread(write_client_config, profile.client_name, address,
+                                        certificate=certificate)
+                profile.assigned_ip = address
+                await db.commit()
+            except BaseException as error:
+                await db.rollback()
+                if created_name:
+                    # No caller has received this uncommitted bundle. Remove its CCD;
+                    # retain the durable address and old profile for a safe retry.
+                    (Path(settings.OPENVPN_CCD_DIR) / created_name).unlink(missing_ok=True)
+                if isinstance(error, (VPNProvisionerError, OSError, ValueError, RuntimeError)):
+                    logger.error("Cannot provision VPN credentials; retry after resolving PKI/control failure")
+                    raise VpnConfigurationError("Cannot provision VPN address/configuration") from None
+                raise
             await db.refresh(profile)
             return profile
 
@@ -116,6 +155,9 @@ class ProductionVPNService(VPNService):
                 bytes_sent=0,
                 indicator="disconnected",
             )
+
+        from backend.app.services.vpn_credentials import certificate_details
+        expires_at = certificate_details(profile.config_data, profile.client_name).expires_at
 
         # Parse live status from OpenVPN
         try:
@@ -158,6 +200,7 @@ class ProductionVPNService(VPNService):
                 last_seen_at=profile.last_seen_at,
                 indicator="connected",
                 connected_clients=len(status_data),
+                expires_at=expires_at,
             )
         else:
             # Client not currently connected
@@ -174,6 +217,7 @@ class ProductionVPNService(VPNService):
                 last_seen_at=profile.last_seen_at,
                 indicator="disconnected",
                 connected_clients=len(status_data),
+                expires_at=expires_at,
             )
 
     async def get_download_profile(self, db: AsyncSession, user: User) -> VpnDownloadOut:
@@ -185,11 +229,14 @@ class ProductionVPNService(VPNService):
                 detail="Your VPN profile has been revoked. Please contact an administrator."
             )
 
+        from backend.app.services.vpn_credentials import certificate_details
+        expires_at = certificate_details(profile.config_data, profile.client_name).expires_at
         filename = f"{profile.client_name}.ovpn"
         return VpnDownloadOut(
             filename=filename,
             config_data=profile.config_data,
             client_ip=profile.assigned_ip,
+            expires_at=expires_at,
         )
 
     async def revoke_profile(self, db: AsyncSession, user: User, session_id: Optional[str] = None) -> bool:

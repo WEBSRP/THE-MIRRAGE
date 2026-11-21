@@ -1,3 +1,4 @@
+import { canDownloadSessionVpn } from '../services/sessionService';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   type ActivityItem,
@@ -518,23 +519,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [activeSessionData, challenges, vpnTelemetry]);
 
   const downloadVpnConfig = useCallback(async (filename?: string | unknown) => {
+    if (!canDownloadSessionVpn(activeSessionData)) return;
     try {
       const fname = typeof filename === 'string' ? filename : undefined;
       await apiDownloadVpnConfig(fname);
       pushToast('VPN profile downloaded', 'Import your .ovpn profile into OpenVPN Connect or CLI.', 'success');
     } catch (err: any) {
       pushToast('Download failed', err.message || 'Unable to retrieve VPN profile.', 'error');
+    } finally {
+      await refreshSessionStatus();
     }
-  }, [pushToast]);
+  }, [activeSessionData, pushToast, refreshSessionStatus]);
 
   const downloadSignalConfig = useCallback(async () => {
+    if (!canDownloadSessionVpn(activeSessionData)) return;
     try {
       await apiDownloadSignalConfig();
       pushToast('Signal profile downloaded', 'Connection metadata profile ready.', 'success');
     } catch (err: any) {
       pushToast('Download failed', err.message || 'Unable to retrieve Signal profile.', 'error');
+    } finally {
+      await refreshSessionStatus();
     }
-  }, [pushToast]);
+  }, [activeSessionData, pushToast, refreshSessionStatus]);
 
   const connectVpn = useCallback(async (): Promise<AuthResult> => {
     await refreshVpnStatus();

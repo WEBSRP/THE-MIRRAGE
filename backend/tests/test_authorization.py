@@ -76,8 +76,11 @@ async def test_vpn_profiles_are_isolated_per_user(
     async_client: AsyncClient,
     auth_headers: dict,
     second_auth_headers: dict,
+    start_downloadable_session,
 ):
     """User A and User B get distinct VPN profiles and distinct IP allocations."""
+    await start_downloadable_session(auth_headers)
+    await start_downloadable_session(second_auth_headers)
     # User A profile
     resp_a = await async_client.get(
         f"{settings.API_V1_STR}/vpn/profile",

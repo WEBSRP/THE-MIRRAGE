@@ -43,13 +43,11 @@ async def profile_for(async_client, headers):
 
 @pytest.mark.asyncio
 async def test_admin_revokes_selected_player_keeps_others_and_blocks_all_reentry(
-    async_client, admin_headers, second_auth_headers, test_user, second_user, db_session
+    async_client, admin_headers, second_auth_headers, test_user, second_user, db_session, start_downloadable_session
 ):
-    await profile_for(async_client, second_auth_headers)
+    session = await start_downloadable_session(second_auth_headers)
+    own = await start_downloadable_session(admin_headers)
     other_profile = await profile_for(async_client, admin_headers)
-    target_session = await async_client.post("/api/v1/session/start", headers=second_auth_headers)
-    own_session = await async_client.post("/api/v1/session/start", headers=admin_headers)
-    assert target_session.status_code == own_session.status_code == 201
     path = f"/api/v1/vpn/users/{second_user.id}/revoke"
     response = await async_client.post(path, headers=admin_headers)
     assert response.status_code == 202 and response.json()["status"] == "pending"
@@ -70,9 +68,9 @@ async def test_admin_revokes_selected_player_keeps_others_and_blocks_all_reentry
     await vpn_revocation_service.process_pending(db_session)
     status = await async_client.get(f"/api/v1/vpn/users/{second_user.id}/revocation", headers=admin_headers)
     assert status.json()["status"] == "completed"
-    session = await db_session.get(GameSession, target_session.json()["session_id"])
+    await db_session.refresh(session)
     assert session.status == SessionStatus.TERMINATED and session.mirage_ip is None
-    own = await db_session.get(GameSession, own_session.json()["session_id"])
+    await db_session.refresh(own)
     assert own.status == SessionStatus.READY
     assert (await profile_for(async_client, admin_headers))["filename"] == other_profile["filename"]
     repeated = await async_client.post(path, headers=admin_headers)
@@ -106,7 +104,9 @@ async def test_missing_profile_is_not_claimed_revoked(async_client, admin_header
 async def test_production_failure_is_durable_retryable_and_never_exposes_error_output(
     async_client, admin_headers, second_auth_headers, second_user, db_session, monkeypatch
 ):
-    await profile_for(async_client, second_auth_headers)
+    from backend.app.services.vpn_service import MockVPNService
+
+    await MockVPNService().generate_or_get_profile(db_session, second_user)
     await vpn_revocation_service.request(db_session, second_user.id, second_user.id)
     job = await vpn_revocation_service.get(db_session, second_user.id)
     fake = SimpleNamespace(block=AsyncMock(), publish=AsyncMock(side_effect=RuntimeError("private-pki-value")))
@@ -131,7 +131,9 @@ async def test_production_failure_is_durable_retryable_and_never_exposes_error_o
 
 @pytest.mark.asyncio
 async def test_interrupted_worker_claim_can_be_reclaimed(db_session, test_user, async_client, auth_headers):
-    await profile_for(async_client, auth_headers)
+    from backend.app.services.vpn_service import MockVPNService
+
+    await MockVPNService().generate_or_get_profile(db_session, test_user)
     job = await vpn_revocation_service.request(db_session, test_user.id, test_user.id)
     job.claim_token = "interrupted-worker"
     job.claimed_until = datetime.now(timezone.utc) + timedelta(seconds=60)
@@ -166,7 +168,9 @@ async def test_public_certificate_only_survives_profile_scrubbing(db_session, te
 async def test_failed_session_cleanup_keeps_revocation_pending_and_retries(
     async_client, auth_headers, test_user, db_session, monkeypatch
 ):
-    await profile_for(async_client, auth_headers)
+    from backend.app.services.vpn_service import MockVPNService
+
+    await MockVPNService().generate_or_get_profile(db_session, test_user)
     job = await vpn_revocation_service.request(db_session, test_user.id, test_user.id)
     monkeypatch.setattr(vpn_revocation_service, "close_sessions", AsyncMock(return_value=False))
     assert not await vpn_revocation_service.process_one(db_session, job.client_name)

@@ -1,3 +1,4 @@
+import { canDownloadSessionVpn } from '../services/sessionService';
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { Badge, Button, Card, StatusBadge } from '../components/ui';
@@ -9,6 +10,7 @@ type Diagnostic = { label: string; detail: string; status: 'idle' | 'running' | 
 
 export function VpnPage() {
   const {
+    activeSessionData,
     vpnTelemetry,
     refreshVpnStatus,
     downloadVpnConfig,
@@ -16,6 +18,11 @@ export function VpnPage() {
     pushToast,
   } = useApp();
 
+  const vpnDownloadAvailable = canDownloadSessionVpn(activeSessionData);
+  const remaining = activeSessionData && 'vpn_downloads_remaining' in activeSessionData
+    ? activeSessionData.vpn_downloads_remaining
+    : undefined;
+  const downloadLimitReached = remaining === 0 && activeSessionData?.status === 'ready';
   const [busy, setBusy] = useState(false);
   const [downloadingSignal, setDownloadingSignal] = useState(false);
   const [activePlatform, setActivePlatform] = useState<Platform>('linux');
@@ -118,8 +125,16 @@ export function VpnPage() {
           <div className="vpn-status-copy">
             {isConnected
               ? `Connected to the MIRRAGE gateway as ${vpnTelemetry?.assigned_ip}. All cluster pod targets are directly accessible.`
-              : 'Download your .ovpn configuration file below and connect with your local OpenVPN client.'}
+              : downloadLimitReached
+                ? 'You have used all VPN downloads for this session. You can still use your downloaded profile.'
+                : vpnDownloadAvailable
+                ? 'Download your .ovpn profile and import it into OpenVPN.'
+                : 'Start a session and wait for it to be healthy and the countdown to finish to download your VPN profile.'}
           </div>
+
+          {vpnDownloadAvailable && remaining !== undefined && (
+            <p role="status">{remaining} VPN {remaining === 1 ? 'download' : 'downloads'} remaining this session.</p>
+          )}
 
           <div className="vpn-actions" style={{ display: 'flex', gap: '0.75rem' }}>
             <Button
@@ -132,6 +147,7 @@ export function VpnPage() {
             </Button>
             <Button
               icon="download"
+              disabled={!vpnDownloadAvailable}
               onClick={() => { void downloadVpnConfig(); }}
               variant="primary"
             >
@@ -239,6 +255,7 @@ export function VpnPage() {
             <Button
               className="vpn-download"
               icon="download"
+              disabled={!vpnDownloadAvailable}
               onClick={() => { void downloadVpnConfig(); }}
               style={{ flex: 1 }}
               variant="secondary"
@@ -248,6 +265,7 @@ export function VpnPage() {
             <Button
               icon="activity"
               loading={downloadingSignal}
+              disabled={!vpnDownloadAvailable}
               onClick={handleDownloadSignal}
               style={{ flex: 1 }}
               variant="secondary"

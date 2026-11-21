@@ -1,5 +1,10 @@
 # Live OTP reset diagnosis and recovery preparation
 
+Latest update: one-day VPN expiry is deployed; all nine old profiles were
+replaced and must be downloaded again. Backend is healthy and now runs from an
+independent release/venv with `/etc/mirrage/backend.env`, so the older working-tree
+coupling notes below are historical. See [vpn-profile-expiry.md](vpn-profile-expiry.md).
+
 Observed on 2026-11-21. The user confirmed the issue is on the live website.
 The frontend repair is implemented and reviewable. The user subsequently authorized
 production recovery and confirmed that direct EC2 SSH works independently of the

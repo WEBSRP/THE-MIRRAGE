@@ -38,6 +38,8 @@ class SessionStatusResponse(BaseModel):
     last_active_at: datetime
     time_remaining_seconds: int
     is_ready: bool
+    vpn_download_available: bool = False
+    vpn_downloads_remaining: int = 0
 
     model_config = {"from_attributes": True}
 

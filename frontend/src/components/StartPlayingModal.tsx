@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { downloadVpnConfig, downloadSignalConfig } from '../services/vpnService';
+import { canDownloadSessionVpn } from '../services/sessionService';
+import { useApp } from '../state/AppState';
 import { Button } from './ui';
 import { Icon } from './Icon';
+import { Link } from 'react-router-dom';
 
 export function StartPlayingModal({
   isOpen,
@@ -12,20 +14,10 @@ export function StartPlayingModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const [downloadingVpn, setDownloadingVpn] = useState(false);
+  const { activeSessionData, downloadSignalConfig } = useApp();
   const [downloadingSignal, setDownloadingSignal] = useState(false);
 
   if (!isOpen) return null;
-
-  const handleDownloadVpn = async () => {
-    setDownloadingVpn(true);
-    try {
-      await downloadVpnConfig();
-    } catch {
-      // Silent fail
-    }
-    setDownloadingVpn(false);
-  };
 
   const handleDownloadSignal = async () => {
     setDownloadingSignal(true);
@@ -65,30 +57,13 @@ export function StartPlayingModal({
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
-          <button
-            type="button"
-            onClick={() => { void handleDownloadVpn(); }}
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: 'var(--radius)',
-              cursor: 'pointer',
-              textAlign: 'center',
-              padding: '1rem',
-              color: 'var(--white)',
-            }}
-          >
-            <div style={{ color: 'var(--lime)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
-              <Icon name="download" size={24} />
-            </div>
-            <strong style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>VPN Profile</strong>
-            <small style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
-              {downloadingVpn ? 'Downloading...' : 'Get .ovpn profile'}
-            </small>
-          </button>
+          <Link to="/vpn" onClick={onClose}>
+            Open VPN page
+          </Link>
 
           <button
             type="button"
+            disabled={!canDownloadSessionVpn(activeSessionData)}
             onClick={() => { void handleDownloadSignal(); }}
             style={{
               background: 'var(--panel)',

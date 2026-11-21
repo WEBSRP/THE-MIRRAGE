@@ -13,7 +13,7 @@ import {
   type SessionStatusResponse,
   type SlotInfo,
 } from '../services/sessionService';
-import { getVpnStatus, downloadVpnConfig } from '../services/vpnService';
+import { getVpnStatus } from '../services/vpnService';
 
 type SessionLifecycleStatus = 'idle' | 'starting' | 'initializing' | 'ready' | 'stopping' | 'failed';
 type VpnConnectionStatus = 'unknown' | 'disconnected' | 'connected';
@@ -44,7 +44,6 @@ export function SessionsPage() {
   const [sessionData, setSessionData] = useState<SessionStatusResponse | null>(null);
   const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [isCheckingInitial, setIsCheckingInitial] = useState(true);
-  const [downloadingVpn, setDownloadingVpn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState(false);
   const [terminalCommand, setTerminalCommand] = useState('');
@@ -498,20 +497,6 @@ export function SessionsPage() {
     }
   };
 
-  const handleDownloadVpn = async () => {
-    setDownloadingVpn(true);
-    try {
-      const filename = sessionData?.session_id
-        ? `mirrage-${sessionData.session_id.substring(0, 8)}.ovpn`
-        : 'mirrage.ovpn';
-      await downloadVpnConfig(filename);
-    } catch (err: any) {
-      setError(err.message || 'Failed to download VPN profile.');
-    } finally {
-      setDownloadingVpn(false);
-    }
-  };
-
   const handleCopy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -742,12 +727,11 @@ export function SessionsPage() {
               )}
               <Button
                 icon="download"
-                loading={downloadingVpn}
-                onClick={handleDownloadVpn}
+                onClick={() => navigate('/vpn')}
                 size="small"
                 variant="primary"
               >
-                Get .ovpn
+                Open VPN page
               </Button>
             </div>
           </Card>

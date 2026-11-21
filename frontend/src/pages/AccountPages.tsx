@@ -1,10 +1,11 @@
+import { Link } from 'react-router-dom';
 import { useState, type FormEvent } from 'react';
 import { Icon } from '../components/Icon';
 import { Badge, Button, Card, ConfirmDialog, TextField } from '../components/ui';
 import { useApp, useTheme } from '../state/AppState';
 
 export function ProfilePage() {
-  const { user, updateUser, activities, solvedChallengeIds, logout, downloadVpnConfig } = useApp();
+  const { user, updateUser, activities, solvedChallengeIds, logout } = useApp();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: user.name, username: user.username, email: user.email });
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
@@ -158,9 +159,7 @@ export function ProfilePage() {
             <p style={{ marginBottom: '1rem' }}>
               Your account has a dedicated OpenVPN profile. Connect through your VPN client to access the assigned challenge environment.
             </p>
-            <Button onClick={() => downloadVpnConfig()} size="small" variant="secondary" icon="download">
-              Download Active .ovpn Profile
-            </Button>
+            <Link to="/vpn">Open VPN page</Link>
           </div>
         </Card>
       </div>
