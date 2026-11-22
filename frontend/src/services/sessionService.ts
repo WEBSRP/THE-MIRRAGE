@@ -32,6 +32,7 @@ export interface SessionStatusResponse {
 export interface SlotInfo {
   total_slots: number;
   active_slots: number;
+  cooldown_slots?: number;
   available_slots: number;
   is_slot_available: boolean;
 }
@@ -68,3 +69,13 @@ export const stopSession = terminateSession;
 export function canDownloadSessionVpn(session: SessionResponse | SessionStatusResponse | null): boolean {
   return Boolean(session && 'vpn_download_available' in session && session.vpn_download_available);
 }
+
+export interface SessionQueueStatus {
+  status: 'idle' | 'waiting' | 'offered';
+  position: number | null;
+  hold_until: string | null;
+}
+
+export const getSessionQueue = () => api.get<SessionQueueStatus>('/api/v1/session/queue');
+export const joinSessionQueue = () => api.post<SessionQueueStatus>('/api/v1/session/queue');
+export const leaveSessionQueue = () => api.post<SessionQueueStatus>('/api/v1/session/queue/leave');

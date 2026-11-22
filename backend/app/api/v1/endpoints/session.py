@@ -1,15 +1,17 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.deps import get_current_user, get_db, get_optional_current_user
 from backend.app.models.user import User
 from backend.app.schemas.session import (
     ActiveSlotsInfo,
     SessionResponse,
+    SessionQueueStatus,
     SessionStartRequest,
     SessionStatusResponse,
 )
 from backend.app.services.auth_service import auth_service
+from backend.app.services import session_queue
 from backend.app.services.session_service import session_service
 
 router = APIRouter(prefix="/session", tags=["Session & Environment Management"])
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/session", tags=["Session & Environment Management"])
 async def get_slots(
     db: AsyncSession = Depends(get_db)
 ):
-    """Check how many of the 3 player session slots are currently available."""
+    """Check how many player session slots are currently available."""
     return await session_service.get_active_slots_info(db)
 
 
@@ -40,7 +42,7 @@ async def start_session(
 ):
     """
     Start the player machine:
-    1. Verifies that an active slot is available (max 3 concurrent).
+    1. Verifies that an active slot is available and honors queue reservations.
     2. Prepares an isolated CTF environment.
     3. Retrieves the Pod IP in the 10.42.0.0/16 subnet.
     4. Returns the Mirage endpoint (10.42.0.x) to the player.
@@ -76,7 +78,7 @@ async def stop_session(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stop the player's active machine, delete the Kubernetes pod, and free the slot.
+    Stop the player's active machine and delete the Kubernetes pod. The slot reopens after cleanup and the cooldown.
     """
     return await session_service.stop_session(db=db, user=current_user, session_id=session_id)
 
@@ -96,3 +98,21 @@ async def extend_session(
     Subject to the maximum session duration limit.
     """
     return await session_service.extend_session(db=db, user=current_user)
+
+
+@router.get("/queue", response_model=SessionQueueStatus)
+async def get_queue(response: Response, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await session_queue.get_status(db, user.id)
+
+
+@router.post("/queue", response_model=SessionQueueStatus)
+async def join_queue(response: Response, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await session_queue.join(db, user.id)
+
+
+@router.post("/queue/leave", response_model=SessionQueueStatus)
+async def leave_queue(response: Response, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await session_queue.leave(db, user.id)

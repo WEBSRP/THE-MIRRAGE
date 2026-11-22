@@ -17,6 +17,8 @@ from backend.migrations.schema_email_health import REVISION as EMAIL_HEALTH_REVI
 from backend.migrations.schema_vpn_download_limit import REVISION as VPN_DOWNLOAD_REVISION, schema as vpn_download_schema
 
 
+from backend.migrations.schema_session_queue import REVISION as SESSION_QUEUE_REVISION, schema as session_queue_schema
+
 def migration_config():
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
     config.attributes["database_url"] = settings.DATABASE_URL
@@ -62,6 +64,7 @@ def adopt_schema(connection):
     snapshots.append((OTP_ABUSE_REVISION, otp_abuse_schema()))
     snapshots.append((EMAIL_HEALTH_REVISION, email_health_schema()))
     snapshots.append((VPN_DOWNLOAD_REVISION, vpn_download_schema()))
+    snapshots.append((SESSION_QUEUE_REVISION, session_queue_schema()))
     for revision, metadata in reversed(snapshots):
         if tables == set(metadata.tables) and matches_schema(connection, metadata):
             config = migration_config()

@@ -1,14 +1,9 @@
+import { contactProfiles } from '../data/socialProfiles';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import './availability-notice.css';
 
 const DISMISSED_KEY = 'mirrage-availability-notice-dismissed';
-const socialProfiles = [
-  { label: 'LinkedIn', logo: 'linkedin', url: 'https://www.linkedin.com/in/websrp/', override: import.meta.env.VITE_CONTACT_LINKEDIN_URL },
-  { label: 'X', logo: 'x', url: 'https://x.com/websrp', override: import.meta.env.VITE_CONTACT_TWITTER_URL },
-  { label: 'Instagram', logo: 'instagram', url: 'https://www.instagram.com/in_soum_niaaaa/', override: import.meta.env.VITE_CONTACT_INSTAGRAM_URL },
-];
-
 function SocialLogo({ platform }: { platform: string }) {
   return (
     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
@@ -25,16 +20,6 @@ function SocialLogo({ platform }: { platform: string }) {
       )}
     </svg>
   );
-}
-
-function profileUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' ? url.href : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export function AvailabilityNotice() {
@@ -87,8 +72,8 @@ export function AvailabilityNotice() {
       </p>
       <p className="availability-notice-example">“Hi! I’d like to play MIRRAGE on [date] at [time + time zone].”</p>
       <nav className="availability-notice-socials" aria-label="Social contact profiles">
-        {socialProfiles.map(({ label, logo, url, override }) => (
-            <a key={label} href={profileUrl(override) || url} target="_blank" rel="noopener noreferrer"
+        {contactProfiles.map(({ label, logo, href }) => (
+            <a key={label} href={href} target="_blank" rel="noopener noreferrer"
               aria-label={`Message me on ${label} (opens in a new tab)`} title={label}>
               <SocialLogo platform={logo} />
             </a>

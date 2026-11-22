@@ -1,0 +1,79 @@
+.public-info {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: var(--ink);
+  color: var(--white);
+}
+
+.public-info-header,
+.public-info-main {
+  width: min(calc(100% - 2 * clamp(20px, 5vw, 72px)), 1440px);
+  margin-inline: auto;
+}
+
+.public-info-header {
+  padding-block: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.public-info-main {
+  display: grid;
+  flex: 1;
+  align-items: center;
+  padding-block: clamp(42px, 8vw, 104px);
+}
+
+.public-info-copy,
+.public-info-error {
+  width: min(100%, 68ch);
+  margin-inline: auto;
+}
+
+.public-info h1 {
+  margin: 0 0 .5em;
+  font-size: clamp(2.25rem, 6vw, 4.5rem);
+  line-height: 1;
+}
+
+.public-info p {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--muted-light);
+  line-height: 1.65;
+}
+
+.public-info-copy h2 {
+  margin: 1.6em 0 .4em;
+  font-size: clamp(1.2rem, 3vw, 1.5rem);
+}
+
+.public-info-copy p a {
+  color: var(--lime);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.public-info-error {
+  width: min(100%, 52rem);
+  padding: clamp(24px, 7vw, 76px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--lime) 10%, transparent), transparent 60%), var(--panel);
+}
+
+.public-info-error .public-info-error-code {
+  margin-bottom: .12em;
+  color: var(--lime);
+  font-family: var(--design-mono, monospace);
+  font-size: clamp(4.5rem, 15vw, 10rem);
+  line-height: 1;
+  letter-spacing: -.08em;
+}
+
+.public-info-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}

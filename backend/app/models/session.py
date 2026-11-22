@@ -86,6 +86,7 @@ class GameSession(Base):
         DateTime(timezone=True),
         nullable=True
     )
+    slot_release_not_before: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships

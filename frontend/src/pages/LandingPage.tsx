@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Icon, Mark, Wordmark } from '../components/Icon';
+import { Icon, Mark } from '../components/Icon';
 import { useApp, useTheme } from '../state/AppState';
 import { DesignStudio } from '../design-system/DesignStudio';
 import { InteractiveSignalCore } from '../design-system/InteractiveVisuals';
+import { SiteFooter } from '../components/SiteFooter';
 import './landing-space.css';
 
 export function LandingPage() {
@@ -99,11 +100,7 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="landing-footer">
-        <Wordmark link={false} />
-        <span>MIRRAGE / Cybersecurity CTF Range</span>
-        <a href="#top">Back to top ↑</a>
-      </footer>
+      <SiteFooter backToTop />
       <DesignStudio open={studioOpen} onClose={closeStudio} />
     </div>
   );

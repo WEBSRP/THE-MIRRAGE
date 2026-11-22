@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, Wordmark, type IconName } from '../components/Icon';
+import { SiteFooter } from '../components/SiteFooter';
 import { Badge, IconButton } from '../components/ui';
 import { useApp, useTheme } from '../state/AppState';
 import { DesignStudio } from '../design-system/DesignStudio';
@@ -63,6 +64,7 @@ export function PlatformLayout() {
           </div>
         </header>
         <main className="platform-content"><Outlet /></main>
+        <SiteFooter />
       </div>
       <DesignStudio open={studioOpen} onClose={() => setStudioOpen(false)} />
     </div>
@@ -78,7 +80,7 @@ function Dropdown({ children, className = '' }: { children: ReactNode; className
 }
 
 export function AuthLayout({ children }: { children: ReactNode }) {
-  return <div className="auth-shell"><div className="auth-promo"><div className="auth-promo-top"><Wordmark /></div><div className="auth-promo-content"><span className="eyebrow"><span className="eyebrow-line" /> Independent cyber range</span><h1>Think like<br /><em>an attacker.</em></h1><p>Private environments. Real signals. No scripted answers. Build a sharper mental model of the systems you defend.</p><div className="auth-promo-stats"><span><strong>128</strong><small>active targets</small></span><span><strong>CTF</strong><small>hands-on challenges</small></span><span><strong>24/7</strong><small>telemetry</small></span></div></div><div className="auth-promo-foot"><span><span className="live-dot" /> Simulation mode / no live connections</span><span>© 2026 MIRRAGE</span></div></div><div className="auth-panel"><div className="auth-panel-top"><NavLink className="auth-back-link" to="/"><Icon name="arrow-left" size={15} /> Back to surface</NavLink><ThemeControl /></div>{children}<div className="auth-panel-foot"><span>By continuing, you agree to our simulated environment terms.</span><span>Need a signal? <a href="mailto:hello@themirrage.me">Contact the team</a></span></div></div></div>;
+  return <div className="auth-shell"><div className="auth-promo"><div className="auth-promo-top"><Wordmark /></div><div className="auth-promo-content"><span className="eyebrow"><span className="eyebrow-line" /> Independent cyber range</span><h1>Think like<br /><em>an attacker.</em></h1><p>Private environments. Real signals. No scripted answers. Build a sharper mental model of the systems you defend.</p><div className="auth-promo-stats"><span><strong>128</strong><small>active targets</small></span><span><strong>CTF</strong><small>hands-on challenges</small></span><span><strong>24/7</strong><small>telemetry</small></span></div></div><div className="auth-promo-foot"><span><span className="live-dot" /> Simulation mode / no live connections</span><span>© 2026 MIRRAGE</span></div></div><div className="auth-panel"><div className="auth-panel-top"><NavLink className="auth-back-link" to="/"><Icon name="arrow-left" size={15} /> Back to surface</NavLink><ThemeControl /></div>{children}<div className="auth-panel-foot"><span>By continuing, you agree to our simulated environment terms.</span><NavLink to="/privacy">Privacy policy</NavLink><span>Need a signal? <a href="mailto:hello@themirrage.me">Contact the team</a></span></div></div></div>;
 }
 
 function ThemeControl() {

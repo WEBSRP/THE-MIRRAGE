@@ -133,23 +133,34 @@ class EmailService:
         if settings.ENVIRONMENT == "development" and settings.OTP_DEV_MODE:
             print(f"DEV MODE OTP for {email}: {otp}")
             return EmailDispatchResult("simulated")
+        return await self._send(email, EMAIL_SUBJECT, generate_otp_email_text(otp), generate_otp_email_html(otp))
+
+    async def send_slot_ready(self, email: str, deadline) -> EmailDispatchResult:
+        if settings.ENVIRONMENT == "testing" or (settings.ENVIRONMENT == "development" and settings.OTP_DEV_MODE):
+            return EmailDispatchResult("simulated")
+        url = "https://themirrage.me/sessions"
+        expires = deadline.strftime("%d %b %Y at %H:%M UTC")
+        message = f"Your MIRRAGE slot is reserved until {expires}. Sign in and start your environment before the reservation expires."
+        return await self._send(email, "Your MIRRAGE slot is ready", f"{message}\n\n{url}",
+                                f'<p>{message}</p><p><a href="{url}">Open MIRRAGE sessions</a></p>')
+
+    async def _send(self, email: str, subject: str, text: str, html_body: str) -> EmailDispatchResult:
         if error := settings.email_configuration_error():
             raise EmailDeliveryError(error, outcome="failed")
         sender = self._sender()
-        text, html_body = generate_otp_email_text(otp), generate_otp_email_html(otp)
         reply = (validate_email(settings.EMAIL_REPLY_TO, check_deliverability=False,
                                 allow_smtputf8=False).ascii_email if settings.EMAIL_REPLY_TO else None)
         if self.provider == "resend":
             endpoint = "https://api.resend.com/emails"
             payload = {"from": formataddr((settings.EMAIL_FROM_NAME, sender)), "to": [email],
-                       "subject": EMAIL_SUBJECT, "text": text, "html": html_body}
+                       "subject": subject, "text": text, "html": html_body}
             if reply:
                 payload["reply_to"] = reply
         else:
             endpoint = "https://api.sendgrid.com/v3/mail/send"
             payload = {"personalizations": [{"to": [{"email": email}]}],
                        "from": {"email": sender, "name": settings.EMAIL_FROM_NAME},
-                       "subject": EMAIL_SUBJECT, "content": [{"type": "text/plain", "value": text},
+                       "subject": subject, "content": [{"type": "text/plain", "value": text},
                                                               {"type": "text/html", "value": html_body}]}
             if reply:
                 payload["reply_to"] = {"email": reply}
@@ -171,7 +182,7 @@ class EmailService:
                         raise ValueError()
                 except (ValueError, TypeError):
                     raise EmailDeliveryError("PROVIDER_RESPONSE_INVALID", http_status=response.status_code) from None
-            logger.info("OTP email accepted by provider %s", self.provider)
+            logger.info("Email accepted by provider %s", self.provider)
             return EmailDispatchResult("accepted", response.status_code)
         except (TimeoutError, httpx.TimeoutException):
             raise EmailDeliveryError("PROVIDER_TIMEOUT") from None

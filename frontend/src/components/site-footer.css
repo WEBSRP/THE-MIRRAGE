@@ -1,0 +1,39 @@
+.mirrage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 36px;
+  margin-inline: auto;
+  width: min(calc(100% - 2 * clamp(20px, 5vw, 72px)), 1440px);
+  padding-block: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.mirrage-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+}
+
+.mirrage-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.mirrage-footer nav a {
+  color: var(--muted-light);
+  font-size: .875rem;
+}
+
+.mirrage-footer a:hover {
+  color: var(--lime);
+}
+
+@media (max-width: 600px) {
+  .mirrage-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

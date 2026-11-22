@@ -23,7 +23,7 @@ from backend.app.models.user import User
 from backend.app.models.vpn import VpnAddressReservation, VpnRevocation
 from backend.migrations.schema_20261120 import REVISIONS, schema_at
 from backend.migrations.schema_email_health import REVISION as EMAIL_REVISION, schema as email_schema
-from backend.migrations.schema_vpn_download_limit import REVISION as HEAD_REVISION
+from backend.migrations.schema_session_queue import REVISION as HEAD_REVISION
 from backend.migrations.schema_otp_abuse import REVISION as ABUSE_REVISION, schema as abuse_schema
 
 
@@ -295,3 +295,73 @@ async def test_adoption_and_retention_guard_for_email_health(migration_db):
     with pytest.raises(RuntimeError, match="would discard data"):
         await migrate(engine, ABUSE_REVISION, downgrade=True)
     assert await heads(engine) == (EMAIL_REVISION,)
+
+
+@pytest.mark.asyncio
+async def test_migrated_download_limit_rejects_parallel_direct_api_requests(migration_db, monkeypatch):
+    from datetime import timedelta
+    from unittest.mock import AsyncMock
+
+    from httpx import ASGITransport, AsyncClient
+    from backend.app.api.v1.endpoints.vpn import vpn_service
+    from backend.app.core.config import settings
+    from backend.app.core.database import get_db
+    from backend.app.core.security import create_access_token
+    from backend.app.main import app
+    from backend.app.models.session import GameSession, SessionStatus
+    from backend.app.schemas.vpn import VpnDownloadOut
+    from backend.app.services.session_service import session_service
+
+    if migration_db.dialect.name != "postgresql":
+        pytest.skip("Exercises concurrent production PostgreSQL requests")
+
+    await migrate(migration_db)
+    now = datetime.now(timezone.utc)
+    async with AsyncSession(migration_db, expire_on_commit=False) as db:
+        user = User(email="parallel-download@example.com", username="parallel-download", is_active=True)
+        db.add(user)
+        await db.flush()
+        session = GameSession(
+            user_id=user.id, status=SessionStatus.READY, mirage_ip="10.42.0.10",
+            created_at=now - timedelta(minutes=4), ready_at=now - timedelta(minutes=3),
+            expires_at=now + timedelta(hours=1),
+        )
+        db.add(session)
+        await db.commit()
+        session_id = session.id
+        headers = {"Authorization": f"Bearer {create_access_token(subject=user.id)}"}
+
+    request_count = 8
+    reconciled = 0
+    concurrent = asyncio.Event()
+
+    async def healthy_pod(_db, game_session):
+        nonlocal reconciled
+        reconciled += 1
+        if reconciled == request_count:
+            concurrent.set()
+        await asyncio.wait_for(concurrent.wait(), timeout=10)
+        return game_session
+
+    monkeypatch.setattr(settings, "VPN_DOWNLOAD_LIMIT_PER_SESSION", 3)
+    monkeypatch.setattr(session_service, "_reconcile_single_session", healthy_pod)
+    provider = AsyncMock(return_value=VpnDownloadOut(filename="test.ovpn", config_data="test profile"))
+    monkeypatch.setattr(vpn_service, "get_download_profile", provider)
+
+    async def independent_db():
+        async with AsyncSession(migration_db, expire_on_commit=False) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, independent_db)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        routes = ("/api/v1/vpn/profile", "/api/v1/vpn/download")
+        results = await asyncio.gather(*(
+            client.get(routes[i % len(routes)], headers=headers) for i in range(request_count)
+        ))
+
+    assert sorted(response.status_code for response in results) == [200] * 3 + [429] * 5
+    assert all(response.json()["code"] == "VPN_DOWNLOAD_LIMIT_REACHED"
+               for response in results if response.status_code == 429)
+    assert provider.await_count == 3
+    async with AsyncSession(migration_db) as db:
+        assert (await db.get(GameSession, session_id)).vpn_download_count == 3
