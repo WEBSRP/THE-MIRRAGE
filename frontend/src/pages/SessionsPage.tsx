@@ -10,6 +10,10 @@ import {
   terminateSession,
   extendSession as apiExtendSession,
   getSlotInfo,
+  getSessionQueue,
+  joinSessionQueue,
+  leaveSessionQueue,
+  type SessionQueueStatus,
   type SessionStatusResponse,
   type SlotInfo,
 } from '../services/sessionService';
@@ -42,6 +46,8 @@ export function SessionsPage() {
 
   // ── Session & Cluster metadata ──
   const [sessionData, setSessionData] = useState<SessionStatusResponse | null>(null);
+  const [queue, setQueue] = useState<SessionQueueStatus | null>(null);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [isCheckingInitial, setIsCheckingInitial] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -426,6 +432,41 @@ export function SessionsPage() {
     return () => clearSessionCountdown();
   }, [isEnvironmentActive, sessionData?.expires_at, clearSessionCountdown]);
 
+  useEffect(() => {
+    if (queueBusy || (sessionStatus !== 'idle' && sessionStatus !== 'failed')) return;
+    let stopped = false;
+    const refreshQueue = async () => {
+      const [entry, slots] = await Promise.all([
+        getSessionQueue().catch(() => null),
+        getSlotInfo().catch(() => null),
+      ]);
+      if (stopped) return;
+      if (entry) setQueue(entry);
+      if (slots) setSlotInfo(slots);
+    };
+    void refreshQueue();
+    const timer = window.setInterval(refreshQueue, 5000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [sessionStatus, queueBusy]);
+
+  const handleQueueChange = async (joining: boolean) => {
+    setError(null);
+    setQueueBusy(true);
+    try {
+      const entry = await (joining ? joinSessionQueue() : leaveSessionQueue());
+      setQueue(entry);
+      const slots = await getSlotInfo().catch(() => null);
+      if (slots) setSlotInfo(slots);
+      if (entry.status === 'idle' && joining) {
+        pushToast('Slot available', 'You can start your environment now.', 'info');
+      }
+    } catch (error) {
+      setError((error as { message?: string }).message || 'Unable to update the waiting list.');
+    } finally {
+      setQueueBusy(false);
+    }
+  };
+
   // ── HANDLERS ──
   const handleStartEnvironment = async () => {
     if (sessionStatus !== 'idle' && sessionStatus !== 'failed') return;
@@ -435,6 +476,7 @@ export function SessionsPage() {
 
     try {
       const res = await createSession();
+      setQueue(null);
       setSessionData(res as SessionStatusResponse);
       updateSessionExpiration(res as SessionStatusResponse);
       if (res.status === 'ready') setBackendReady(true);
@@ -448,8 +490,14 @@ export function SessionsPage() {
       setTimeRemainingMs(remaining > 0 ? remaining : TOTAL_COUNTDOWN_MS);
       pushToast('Pod initializing', 'Preparing your private CTF environment.', 'info');
     } catch (err: any) {
-      setError(err.message || 'Failed to start environment. Cluster may be at capacity.');
-      setSessionStatus('failed');
+      setError(err.message || 'Failed to start environment.');
+      if (err.code === 'SLOT_LIMIT_EXCEEDED' || err.code === 'SESSION_QUEUE_REQUIRED') {
+        const slots = await getSlotInfo().catch(() => null);
+        if (slots) setSlotInfo(slots);
+        setSessionStatus('idle');
+      } else {
+        setSessionStatus('failed');
+      }
     }
   };
 
@@ -475,7 +523,7 @@ export function SessionsPage() {
       setError(null);
       const slots = await getSlotInfo().catch(() => null);
       if (slots) setSlotInfo(slots);
-      pushToast('Environment terminated', 'Pod deleted and slot released.', 'info');
+      pushToast('Environment terminated', 'Your environment is closed. The slot is in its cleanup window.', 'info');
     } catch (err: any) {
       setError(err.message || 'Failed to stop environment.');
       setSessionStatus(previousStatus);
@@ -616,17 +664,35 @@ export function SessionsPage() {
             Start your environment to receive a target address. Connect through OpenVPN, explore the machine, and capture the flags.
           </p>
 
-          <Button
-            disabled={isCheckingInitial || (slotInfo ? slotInfo.available_slots <= 0 : false)}
-            icon="play"
-            loading={isCheckingInitial}
-            onClick={handleStartEnvironment}
-            size="large"
-            style={{ minWidth: '220px' }}
-            variant="primary"
-          >
-            Start Environment
-          </Button>
+          {Boolean(slotInfo?.cooldown_slots) && <p>Recently closed slots reopen after the cleanup window.</p>}
+          {queue?.status === 'waiting' ? (
+            <div>
+              <p role="status">Waiting list position: <strong>{queue.position}</strong></p>
+              <p>When a player leaves, we wait at least 10 minutes and finish cleanup before emailing the next player. You’ll have 10 minutes to sign in and start.</p>
+              <Button loading={queueBusy} onClick={() => void handleQueueChange(false)}>Leave queue</Button>
+            </div>
+          ) : (
+            <>
+              {queue?.status === 'offered' && queue.hold_until && (
+                <p role="status">Your slot is reserved until {new Date(queue.hold_until).toLocaleTimeString([], {
+                  hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+                })}. Start your environment before then.</p>
+              )}
+              {queue?.status !== 'offered' && slotInfo?.available_slots === 0 ? (
+                <Button loading={queueBusy} disabled={isCheckingInitial} onClick={() => void handleQueueChange(true)} variant="primary">
+                  Join waiting list
+                </Button>
+              ) : (
+                <Button disabled={isCheckingInitial || queueBusy} icon="play" loading={isCheckingInitial}
+                  onClick={handleStartEnvironment} size="large" variant="primary">
+                  Start Environment
+                </Button>
+              )}
+              {queue?.status === 'offered' && (
+                <Button loading={queueBusy} onClick={() => void handleQueueChange(false)}>Release slot</Button>
+              )}
+            </>
+          )}
         </Card>
       )}
 

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from backend.app.models.session import SessionStatus
 
@@ -47,5 +47,12 @@ class SessionStatusResponse(BaseModel):
 class ActiveSlotsInfo(BaseModel):
     total_slots: int
     active_slots: int
+    cooldown_slots: int = 0
     available_slots: int
     is_slot_available: bool
+
+
+class SessionQueueStatus(BaseModel):
+    status: Literal["idle", "waiting", "offered"]
+    position: int | None = None
+    hold_until: datetime | None = None

@@ -24,6 +24,7 @@ Alembic configuration is `backend/alembic.ini`. Frozen schema definitions live i
 | `20261120_0005` | Per-IP OTP request counters and global email budgets |
 | `20261120_0006` | Private operational email provider health metadata |
 | `20261121_0007` | Per-session VPN download count, initialized to zero for existing sessions |
+| `20261122_0008` | Session waiting list, cleanup cooldowns, expiring slot reservations, and notification attempts |
 
 Live update (21 November 2026): RDS is at `20261121_0007`. The migration committed
 in one transaction after checking the previous revision, and verification confirmed
@@ -60,7 +61,7 @@ backend/.venv/bin/python -m backend.scripts.migrate upgrade
 backend/.venv/bin/python -m backend.scripts.migrate status
 ```
 
-`upgrade` defaults to `head`; status should report `current` at `20261121_0007`.
+`upgrade` defaults to `head`; status should report `current` at `20261122_0008`.
 The status operation reads revision state and does not initialize tables. Start
 the backend normally afterward; challenge seeding/data sanitization occurs there.
 The existing explicit initialization helper also applies migrations before seeding:
@@ -89,7 +90,7 @@ backend/.venv/bin/python -m backend.scripts.migrate status
 recording its revision. It checks table sets, columns/types/nullability/defaults,
 indexes/unique keys, foreign keys, primary keys and native PostgreSQL enum labels.
 It changes only migration tracking; it does not recreate tables or transform data.
-A database already containing the full current schema can be adopted at `0007`; a
+A database already containing the full current schema can be adopted at `0008`; a
 baseline database adopts `0001` and gets the additive changes through upgrade.
 
 Unknown/partial layouts, altered constraints, extra tables and pre-baseline schemas

@@ -5,6 +5,7 @@ import { Button, Modal, ToastViewport } from './components/ui';
 import { AvailabilityNotice } from './components/AvailabilityNotice';
 import { AuthLayout, PlatformLayout } from './layouts/PlatformLayout';
 import { LandingPage } from './pages/LandingPage';
+import { AboutPage, NotFoundPage, PrivacyPage } from './pages/PublicInfoPages';
 import { ChallengeDetailPage, ChallengesPage } from './pages/ChallengesPages';
 import { LoginPage, VerifyOtpPage } from './pages/AuthPages';
 import { DashboardPage } from './pages/DashboardPage';
@@ -101,19 +102,6 @@ function PassagePage() {
   );
 }
 
-function NotFoundPage() {
-  return (
-    <div className="not-found-page">
-      <span className="platform-eyebrow">Signal not found / 404</span>
-      <h1>Nothing here<br /><em>but silence.</em></h1>
-      <p>The route you requested is outside the current observation layer.</p>
-      <a className="ui-button ui-button-primary ui-button-medium" href="/">
-        Return to the surface
-      </a>
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -121,6 +109,8 @@ export default function App() {
         {/* Public routes */}
         <Route element={<LandingPage />} path="/" />
         <Route element={<LandingPage />} path="/explore" />
+        <Route element={<AboutPage />} path="/about" />
+        <Route element={<PrivacyPage />} path="/privacy" />
 
         {/* Auth routes */}
         <Route element={<AuthLayout><PublicAuthRoute><LoginPage /></PublicAuthRoute></AuthLayout>} path="/login" />

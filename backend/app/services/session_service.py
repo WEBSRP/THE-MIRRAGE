@@ -24,6 +24,7 @@ from backend.app.core.exceptions import (
 from backend.app.models.activity import ActivityEventType, ActivityLog
 from backend.app.models.session import GameSession, SessionStatus
 from backend.app.models.user import User
+from backend.app.services import session_queue
 from backend.app.services.vpn_access import require_vpn_access, vpn_access_revoked
 from backend.app.schemas.session import (
     ActiveSlotsInfo,
@@ -42,6 +43,26 @@ ACTIVE_STATUSES = [
     SessionStatus.READY,
     SessionStatus.STOPPING,
 ]
+
+
+SLOT_CLEANUP_DELAY = timedelta(minutes=10)
+
+
+def mark_session_stopping(session: GameSession, now: datetime) -> None:
+    # Start the delay once, even if cleanup must be retried.
+    if session.ready_at is not None and session.slot_release_not_before is None:
+        session.slot_release_not_before = now + SLOT_CLEANUP_DELAY
+    session.status = SessionStatus.STOPPING
+
+
+async def slot_counts(db: AsyncSession, now: datetime) -> tuple[int, int]:
+    active = GameSession.status.in_(ACTIVE_STATUSES)
+    result = await db.execute(select(
+        func.count(GameSession.id).filter(active),
+        func.count(GameSession.id).filter(~active, GameSession.slot_release_not_before > now),
+    ))
+    active_count, cooldown_count = result.one()
+    return active_count, cooldown_count
 
 
 def _to_utc(dt: Optional[datetime]) -> datetime:
@@ -84,17 +105,14 @@ class SessionService:
 
     async def get_active_slots_info(self, db: AsyncSession) -> ActiveSlotsInfo:
         """Query currently active sessions vs max slot limit."""
-        query = select(func.count(GameSession.id)).where(
-            GameSession.status.in_(ACTIVE_STATUSES)
-        )
-        result = await db.execute(query)
-        active_count = result.scalar() or 0
+        active_count, cooldown = await slot_counts(db, datetime.now(timezone.utc))
         total_slots = settings.MAX_CONCURRENT_SESSIONS
-        available = max(0, total_slots - active_count)
+        available = await session_queue.open_slots(db, active_count + cooldown)
 
         return ActiveSlotsInfo(
             total_slots=total_slots,
             active_slots=active_count,
+            cooldown_slots=cooldown,
             available_slots=available,
             is_slot_available=available > 0,
         )
@@ -166,7 +184,7 @@ class SessionService:
                 return False  # A concurrent extension won the database row lock.
             if session.status in (SessionStatus.TERMINATED, SessionStatus.EXPIRED):
                 return True
-            session.status = SessionStatus.STOPPING
+            mark_session_stopping(session, datetime.now(timezone.utc))
             session.mirage_ip = session.pod_ip = session.ctf_ip = None
             await db.commit()
             try:
@@ -383,19 +401,15 @@ class SessionService:
         # VPN provisioning commits its own durable reservation before slot locking.
         # 2. Atomically reserve slot and create INITIALIZING record under mutual exclusion
         async with self._slot_lock:
-            vpn_profile = await self.vpn_service.generate_or_get_profile(db, user)
             await self.reconcile_orphaned_sessions(db)
-            if db.bind and db.bind.dialect.name == "postgresql":
-                await db.execute(text("SELECT pg_advisory_xact_lock(74291823)"))
+            # Fail before VPN work when all capacity belongs to other players.
+            slots = await self.get_active_slots_info(db)
+            await session_queue.require_slot(db, user.id, slots.active_slots + slots.cooldown_slots)
+            vpn_profile = await self.vpn_service.generate_or_get_profile(db, user)
+            await session_queue.lock_slots(db)
 
-            count_query = select(func.count(GameSession.id)).where(
-                GameSession.status.in_(ACTIVE_STATUSES)
-            )
-            result = await db.execute(count_query)
-            active_count = result.scalar() or 0
-
-            if active_count >= settings.MAX_CONCURRENT_SESSIONS:
-                raise SlotLimitExceededError(settings.MAX_CONCURRENT_SESSIONS)
+            active_count, cooldown = await slot_counts(db, datetime.now(timezone.utc))
+            offer = await session_queue.require_slot(db, user.id, active_count + cooldown)
 
             user_query = select(GameSession).where(
                 GameSession.user_id == user.id,
@@ -424,6 +438,8 @@ class SessionService:
             await db.flush()
             new_session.pod_name = self.k8s_provisioner.pod_name(new_session.id)
             new_session.pod_namespace = settings.K8S_NAMESPACE
+            if offer is not None:
+                await db.delete(offer)
             await db.commit()
             await db.refresh(new_session)
 
@@ -585,7 +601,7 @@ class SessionService:
         1. Mark session stopping
         2. Delete Kubernetes resources
         3. Confirm deletion
-        4. Release concurrency slot
+        4. Hold capacity until the slot cooldown elapses
         5. Clear runtime target information
         6. Mark session stopped
         7. Return correct state
@@ -745,7 +761,7 @@ class SessionService:
                     pass
                 await db.refresh(session, with_for_update=True)
                 if session.status not in (SessionStatus.TERMINATED, SessionStatus.EXPIRED):
-                    session.status = SessionStatus.STOPPING
+                    mark_session_stopping(session, datetime.now(timezone.utc))
                     session.mirage_ip = session.pod_ip = session.ctf_ip = None
                     session.error_message = "Network renewal failed; cleanup pending"
                     await db.commit()

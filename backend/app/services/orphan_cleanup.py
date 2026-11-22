@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from backend.app.core.config import settings
 from backend.app.models.session import GameSession, SessionStatus
 from backend.app.models.user import User
-from backend.app.services.session_service import ACTIVE_STATUSES, _to_utc, session_service
+from backend.app.services.session_service import ACTIVE_STATUSES, _to_utc, mark_session_stopping, session_service
 from backend.app.services.vpn_access import vpn_access_revoked
 
 logger = logging.getLogger("mirrage.orphan_cleanup")
@@ -68,7 +68,7 @@ class OrphanCleanupService:
                             continue
                         final = (session.status if session.status not in ACTIVE_STATUSES else
                                  SessionStatus.EXPIRED if _to_utc(session.expires_at) <= now else SessionStatus.TERMINATED)
-                        session.status = SessionStatus.STOPPING
+                        mark_session_stopping(session, now)
                         session.mirage_ip = session.ctf_ip = session.pod_ip = None
                         # Persist the cleanup barrier before external effects so
                         # cancellation/restart cannot make a partially cleaned

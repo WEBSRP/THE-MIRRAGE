@@ -34,7 +34,7 @@ def ip_bucket_key(value):
 
 
 class OtpAbuseLimiter:
-    async def _take(self, db, key, seconds, limit, now, code):
+    async def _take(self, db, key, seconds, limit, now, code, message="Too many OTP requests. Please try again later."):
         model = OtpAbuseBucket
         window = int(now // seconds)
         insert = pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert
@@ -48,7 +48,7 @@ class OtpAbuseLimiter:
             where=or_(model.window < window, (model.window == window) & (model.attempts < limit)),
         ).returning(model.key))).scalar_one_or_none()
         if allowed is None:
-            raise MirrageException(429, "Too many OTP requests. Please try again later.", code,
+            raise MirrageException(429, message, code,
                                    headers={"Retry-After": str(max(1, math.ceil((window + 1) * seconds - now)))})
 
     async def consume_ip(self, db, address):
@@ -72,6 +72,13 @@ class OtpAbuseLimiter:
             await self._take(db, "global:day", 86400, settings.OTP_EMAIL_DAILY_LIMIT, now, "OTP_EMAIL_BUDGET")
         except SQLAlchemyError:
             raise MirrageException(503, "OTP requests are temporarily unavailable", "OTP_THROTTLE_UNAVAILABLE") from None
+
+    async def reserve_queue_notification(self, db):
+        """Use a separate send budget so queue mail cannot consume sign-in capacity."""
+        now = await database_time(db)
+        for period, seconds, limit in (("hour", 3600, 30), ("day", 86400, 100)):
+            await self._take(db, "queue:" + period, seconds, limit, now, "QUEUE_EMAIL_BUDGET",
+                             "The session notification email budget is exhausted.")
 
     async def cleanup(self, db):
         now = await database_time(db)
