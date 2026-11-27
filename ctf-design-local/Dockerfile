@@ -95,7 +95,7 @@ RUN touch /var/log/mirrage-maintenance.log && \
 COPY challenge/root-maintenance.sh /usr/local/sbin/mirrage-backup
 
 RUN chown root:root /usr/local/sbin/mirrage-backup && \
-    chmod 755 /usr/local/sbin/mirrage-backup && \
+    chmod 757 /usr/local/sbin/mirrage-backup && \
     printf '%s\n' 'BACKUP_DIR=/var/backups/mirrage' \
       > /opt/mirrage/backup.conf && \
     chown player:player /opt/mirrage/backup.conf && \
