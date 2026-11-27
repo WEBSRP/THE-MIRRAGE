@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import time
 
+from session_access import render_sets, render_table, validate_config
+
 
 def main():
     if not Path("/.dockerenv").exists():
@@ -26,6 +28,18 @@ def main():
         return subprocess.check_output(["/usr/sbin/nft", "-j", "list", "set", "inet",
                                         "mirrage_player_guard", name], text=True)
 
+    config = validate_config(json.loads((source / "player-isolation.example.json").read_text()))
+    lease = {"before-upgrade": {"vpn_ip": "10.8.0.10", "pod_ip": "10.42.0.20",
+                                "expires_at": int(time.time()) + 30}}
+    subprocess.run(["/usr/sbin/nft", "-f", "-"], check=True, text=True,
+                   input=render_table(config) + render_sets(config, lease))
+    run("check", success=False)
+    run("upgrade")
+    run("upgrade")
+    assert "10.8.0.10" in contents("active_pairs")
+    run("install")
+    assert "10.8.0.10" not in contents("active_pairs")
+    subprocess.run(["/usr/sbin/nft", "delete", "table", "inet", "mirrage_player_guard"], check=True)
     run("install")
     assert json.loads(run("check"))["vpn_interface"] == "tun0"
     expiry = str(int(time.time()) + 30)

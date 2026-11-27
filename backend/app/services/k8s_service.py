@@ -66,10 +66,11 @@ class ProductionKubernetesService(KubernetesService):
                     for item in page.items:
                         data = api.sanitize_for_serialization(item)
                         metadata = data.get("metadata") or {}
-                        ip = (data.get("status") or {}).get("podIP") if kind == "Pod" else None
+                        status = (data.get("status") or {}) if kind == "Pod" else {}
+                        ip = status.get("podIP")
                         if ip:
                             occupied.add(ip)  # Include unrelated/ambiguous pods when retaining source blocks.
-                        resource = (identify_resource(kind, metadata, self.pod_name, ip)
+                        resource = (identify_resource(kind, metadata, self.pod_name, ip, status.get("phase"))
                                     if metadata.get("namespace") == self.namespace else None)
                         if resource:
                             resources.append(resource)
@@ -99,7 +100,8 @@ class ProductionKubernetesService(KubernetesService):
                 raise
             data = client.ApiClient().sanitize_for_serialization(current)
             metadata = data.get("metadata") or {}
-            observed = identify_resource(resource.kind, metadata, self.pod_name, resource.pod_ip)
+            status = (data.get("status") or {}) if resource.kind == "Pod" else {}
+            observed = identify_resource(resource.kind, metadata, self.pod_name, status.get("podIP"), status.get("phase"))
             if metadata.get("namespace") != self.namespace or observed != resource:
                 return False  # Changed labels, UID or version: rescan; never delete a replacement.
             options = client.V1DeleteOptions(preconditions=client.V1Preconditions(
@@ -466,7 +468,7 @@ class MockKubernetesService(KubernetesService):
                 ip = data.get("ip") if kind == "Pod" else None
                 if ip:
                     occupied.add(ip)
-                resource = identify_resource(kind, data.get("metadata") or {}, self.pod_name, ip)
+                resource = identify_resource(kind, data.get("metadata") or {}, self.pod_name, ip, data.get("phase"))
                 if resource:
                     resources.append(resource)
                 else:
@@ -481,7 +483,7 @@ class MockKubernetesService(KubernetesService):
         if data is None:
             return True
         current = identify_resource(resource.kind, data.get("metadata") or {}, self.pod_name,
-                                    data.get("ip") if resource.kind == "Pod" else None)
+                                    data.get("ip") if resource.kind == "Pod" else None, data.get("phase"))
         if current != resource:
             return False
         del entries[resource.name]

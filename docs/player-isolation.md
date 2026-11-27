@@ -39,6 +39,11 @@ VPN connections before rollout; do not roll out mixed old/new backend workers.
   It blocks VPN access to host services, peer VPN clients and unrelated destinations,
   and blocks registered sandboxes from initiating host/other-network connections.
   It drops IPv6 entering the VPN and pod bridge; bridge netfilter must be enabled.
+- Over the VPN, a player can run `ping -c 4 <assigned-pod-ip>` while their lease
+  is active. The gateway allows IPv4 echo traffic to the assigned pod at two
+  requests per second with an initial burst of four, capped at 576 bytes per
+  IPv4 packet. Only replies to those requests can return to the player. Verify
+  echo forwarding when changing the cluster network plugin.
 - nftables set elements expire automatically at the committed session deadline.
   This does not depend on browser polling or the cleanup worker being alive.
 
@@ -263,6 +268,10 @@ The packet harness creates benchmark-address Docker bridges, disables NAT, remov
 all test-container default routes, and cleans up its five containers and two
 networks. It simulates the VPN interface, not an authenticated OpenVPN connection.
 It does not create or modify the production `mirrage_player_guard` table.
+
+On a running gateway, run the new helper with `sudo /path/to/staged-helper upgrade`
+before replacing `/usr/local/sbin/mirrage-session-access`. The upgrade applies the
+ping rules in one transaction and leaves the active lease deadlines intact.
 
 Validated on 2026-11-20: 149 backend tests passed with the PostgreSQL cases enabled;
 the isolated real-nftables helper checks and two-player packet harness both passed.

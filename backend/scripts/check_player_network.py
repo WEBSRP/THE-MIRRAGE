@@ -8,6 +8,7 @@ import argparse
 import ipaddress
 import json
 from pathlib import Path
+import re
 import subprocess
 import time
 import uuid
@@ -99,6 +100,20 @@ def main():
                              f"http://{address}:{port}/", check=False)
             return result.returncode == 0 and result.stdout == "200"
 
+        def ping(container, address, *options):
+            return execute(container, "ping", "-n", "-q", "-W", "1", *options, address, check=False)
+
+        burst = ping(clients[0], pod_ip(20), "-i", "0.01", "-c", "20")
+        replies = re.search(r"\b(\d+) received\b", burst.stdout)
+        assert burst.returncode == 0 and replies and 1 <= int(replies[1]) < 20, burst.stdout + burst.stderr
+        assert ping(clients[1], pod_ip(21), "-c", "1").returncode == 0, "A's burst blocked B's ping"
+        time.sleep(0.5)
+        assert ping(clients[0], pod_ip(20), "-c", "1").returncode == 0, "Owner ping did not recover"
+        assert ping(clients[1], pod_ip(21), "-s", "600", "-c", "1").returncode == 1, "Oversized ping was allowed"
+        assert ping(clients[0], pod_ip(21), "-c", "1").returncode == 1, "Cross-player ping was allowed"
+        assert ping(clients[0], vpn_ip(254), "-c", "1").returncode == 1, "Gateway accepted player ping"
+        assert ping(targets[0], vpn_ip(10), "-c", "1").returncode == 1, "Pod initiated a VPN ping"
+
         assert reachable(gateway, "127.0.0.1", 8000)
         for index in range(2):
             assert reachable(clients[index], pod_ip(20 + index), 80), "Owner target was blocked"
@@ -109,10 +124,11 @@ def main():
             assert not reachable(targets[index], vpn_ip(11 - index), 4444), "Wrong-player callback was reachable"
             assert not reachable(targets[index], pod_ip(254), 8000), "Sandbox reached the host service"
         helper("revoke", "--session", "player-0")
+        assert ping(clients[0], pod_ip(20), "-c", "1").returncode == 1, "Revoked player could still ping"
         assert not reachable(clients[0], pod_ip(20), 80), "Revoked player still reached target"
         assert not reachable(targets[0], vpn_ip(10), 4444), "Revoked callback was still reachable"
         assert reachable(clients[1], pod_ip(21), 80), "Revoking A interrupted B"
-        print("PASS: owner-only target access, host/peer denial, owner-only callbacks and revocation")
+        print("PASS: owner-only access, rate-limited ping, host/peer denial and revocation")
     finally:
         for name in reversed(containers):
             docker("stop", "--time", "1", name, check=False)

@@ -3,7 +3,7 @@
 
 Config: /etc/mirrage/player-isolation.json (root-owned).
 State/lock: /var/lib/mirrage/player-guard/ (root-only).
-Only install is run directly by an operator; the API uses check/grant/revoke/forget.
+Install and upgrade are operator commands; upgrade preserves existing leases.
 """
 import argparse
 import fcntl
@@ -22,6 +22,7 @@ CONFIG = Path("/etc/mirrage/player-isolation.json")
 STATE_DIRECTORY = Path("/var/lib/mirrage/player-guard")
 TABLE = "mirrage_player_guard"
 NFT = "/usr/sbin/nft"
+PING_RULE = "mirrage-vpn-echo-v1"
 
 
 def validate_config(config):
@@ -80,6 +81,22 @@ def render_table(config):
   oifname "{interface}" drop
  }}
 }}
+'''
+
+
+def render_ping_rules(config):
+    vpn = config["vpn_interface"]
+    pods = config["pod_interface"]
+    chain = f"inet {TABLE} player_ping"
+    return f'''add set inet {TABLE} ping_rate {{
+ type ipv4_addr . ipv4_addr; flags dynamic, timeout; timeout 10s; size 256;
+}}
+add chain {chain}
+add rule {chain} iifname "{vpn}" oifname "{pods}" icmp type echo-request ip length <= 576 ip saddr . ip daddr @active_pairs update @ping_rate {{ ip saddr . ip daddr limit rate 2/second burst 4 packets }} counter accept
+add rule {chain} iifname "{pods}" oifname "{vpn}" icmp type echo-reply ip length <= 576 ip daddr . ip saddr @active_pairs ct direction reply ct state established counter accept
+add rule {chain} counter drop
+insert rule inet {TABLE} player_forward oifname "{vpn}" icmp type {{ echo-request, echo-reply }} jump player_ping comment "{PING_RULE}"
+insert rule inet {TABLE} player_forward iifname "{vpn}" icmp type {{ echo-request, echo-reply }} jump player_ping comment "{PING_RULE}"
 '''
 
 
@@ -163,7 +180,7 @@ def nft(*arguments, script=None):
     return result.stdout
 
 
-def check(config):
+def gateway_rules(config):
     for path in ("/proc/sys/net/ipv4/ip_forward", "/proc/sys/net/bridge/bridge-nf-call-iptables",
                  "/proc/sys/net/bridge/bridge-nf-call-ip6tables"):
         if Path(path).read_text().strip() != "1":
@@ -172,6 +189,23 @@ def check(config):
     tables = [row["table"] for row in data["nftables"] if "table" in row]
     if len(tables) != 1 or tables[0].get("comment") != fingerprint(config):
         raise RuntimeError("Gateway rules/configuration mismatch")
+    return data["nftables"]
+
+
+def ping_installed(rules):
+    return sum(row.get("rule", {}).get("comment") == PING_RULE for row in rules) == 2
+
+
+def check(config):
+    if not ping_installed(gateway_rules(config)):
+        raise RuntimeError("Gateway ping rules missing; run the operator upgrade")
+
+
+def upgrade(config):
+    if not ping_installed(gateway_rules(config)):
+        # One transaction and no changes to the live pair set or its deadlines.
+        nft("-f", "-", script=render_ping_rules(config))
+    check(config)
 
 
 def save_state(path, state):
@@ -191,7 +225,7 @@ def save_state(path, state):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["install", "check", "inventory", "status", "grant", "renew", "revoke", "forget"])
+    parser.add_argument("action", choices=["install", "upgrade", "check", "inventory", "status", "grant", "renew", "revoke", "forget"])
     parser.add_argument("--session")
     parser.add_argument("--vpn-ip")
     parser.add_argument("--pod-ip")
@@ -215,13 +249,15 @@ def main():
             # Only our dedicated table, never 'flush ruleset' or k3s chains.
             present = subprocess.run([NFT, "list", "table", "inet", TABLE], capture_output=True).returncode == 0
             if not present:
-                nft("-f", "-", script=render_table(config))
-            check(config)
+                nft("-f", "-", script=render_table(config) + render_ping_rules(config))
+            upgrade(config)
             # Pod IPs may have changed across a reboot. Keep source blocking, but
             # never replay permissions until the API rechecks actual pod ownership.
             state = {key: dict(entry, expires_at=0) for key, entry in state.items()}
             save_state(path, state)
             nft("-f", "-", script=render_sets(config, state))
+        elif args.action == "upgrade":
+            upgrade(config)
         elif args.action == "check":
             check(config)
             print(json.dumps(config))

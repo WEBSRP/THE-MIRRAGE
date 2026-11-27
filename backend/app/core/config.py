@@ -237,7 +237,7 @@ class Settings(BaseSettings):
     SESSION_POD_CIDR: str = "10.42.0.0/16"
     SESSION_POD_INTERFACE: str = "cni0"
     K8S_SESSION_NODE_NAME: str = ""
-    SESSION_CALLBACK_PORTS: List[int] = [4444]
+    SESSION_CALLBACK_PORTS: List[int] = [4444, 1337, 9001, 8443, 4545]
     SESSION_GATEWAY_HELPER: str = "/usr/local/sbin/mirrage-session-access"
 
     @field_validator("SESSION_CALLBACK_PORTS")

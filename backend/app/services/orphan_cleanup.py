@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import re
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 
 from backend.app.core.config import settings
 from backend.app.models.session import GameSession, SessionStatus
@@ -36,7 +36,8 @@ class OrphanCleanupService:
                 raise RuntimeError("Invalid gateway inventory")
             grouped = defaultdict(list)
             for resource in inventory.resources:
-                grouped[resource.session_id].append(resource)
+                if not resource.legacy:
+                    grouped[resource.session_id].append(resource)
             result = dict(cleaned=0, preserved=0, pending=0, ignored=inventory.ignored)
             for session_id in sorted(set(grouped) | set(bindings)):
                 session = None
@@ -91,7 +92,7 @@ class OrphanCleanupService:
                     # before its DB row was removed. Inspect the current binding
                     # before releasing its source block.
                     binding = (await gateway.inventory()).get(session_id)
-                    if (any(item.session_id == session_id for item in remaining.resources)
+                    if (any(item.session_id == session_id and not item.legacy for item in remaining.resources)
                             or (binding and binding["pod_ip"] in remaining.occupied_ips)):
                         raise RuntimeError("Resources still exist; retain the source block")
                     await gateway.forget(session_id)
@@ -107,6 +108,31 @@ class OrphanCleanupService:
                     # do not depend on recreating a missing database row.
                     result["pending"] += 1
                     logger.warning("Orphan cleanup pending for session %s; rescan scheduled", session_id)
+            for resource in inventory.resources:
+                if not resource.legacy:
+                    continue
+                try:
+                    if db.bind.dialect.name == "postgresql":
+                        await db.execute(text("SELECT pg_advisory_xact_lock(74291823)"))
+                    sessions = (await db.execute(select(GameSession).where(or_(
+                        GameSession.id == resource.session_id, GameSession.pod_name == resource.name,
+                    )).with_for_update().execution_options(populate_existing=True))).scalars().all()
+                    current_bindings = await gateway.inventory()
+                    if (any(session.status in ACTIVE_STATUSES or session.user_id != resource.user_id
+                            or session.id != resource.session_id for session in sessions)
+                            or resource.session_id in bindings or resource.session_id in current_bindings
+                            or any(binding["pod_ip"] == resource.pod_ip
+                                   for inventory in (bindings, current_bindings) for binding in inventory.values())):
+                        result["preserved"] += 1
+                    elif await k8s.delete_session_resource(resource):
+                        result["cleaned"] += 1
+                    else:
+                        raise RuntimeError("Legacy pod deletion is not confirmed")
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    result["pending"] += 1
+                    logger.warning("Legacy pod cleanup pending for %s; rescan scheduled", resource.name)
             if result["cleaned"] or result["pending"] or result["ignored"]:
                 logger.info("Resource sweep: %s", result)
             return result

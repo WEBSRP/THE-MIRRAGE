@@ -174,6 +174,38 @@ async def test_partial_inventory_or_database_outage_cannot_trigger_deletion(db_s
     assert name in k8s.pods and gateway.bindings["session-orphan"][2].timestamp() > 0
 
 
+@pytest.mark.asyncio
+async def test_legacy_sweep_removes_only_old_terminal_unbound_player_pods(db_session, test_user, environment):
+    k8s, gateway, controller = environment
+    now = datetime.now(timezone.utc)
+    names = {}
+    for index, case in enumerate(("eligible", "recent", "running", "unowned", "active", "leased")):
+        session_id = f"session-{case}"
+        name = f"{k8s.pod_name(session_id)}-1793612657"
+        labels = {"app.kubernetes.io/name": "mirrage-player", "mirrage.io/session-id": session_id,
+                  "mirrage.io/user-id": test_user.id}
+        if case == "unowned":
+            labels.pop("mirrage.io/user-id")
+        metadata = k8s._mock_metadata(name, labels)
+        metadata["creationTimestamp"] = (now - timedelta(days=0 if case == "recent" else 2)).isoformat()
+        k8s.pods[name] = {"metadata": metadata, "phase": "Running" if case == "running" else "Failed",
+                          "ip": f"10.42.0.{20 + index}"}
+        names[case] = name
+    db_session.add(GameSession(id="session-active", user_id=test_user.id, status=SessionStatus.READY,
+                               pod_name=names["active"], expires_at=now + timedelta(minutes=30)))
+    db_session.add(GameSession(id="session-leased", user_id=test_user.id, status=SessionStatus.READY,
+                               pod_name=names["leased"], expires_at=now + timedelta(minutes=30)))
+    await db_session.commit()
+    await gateway.grant("session-leased", "10.8.0.10", k8s.pods[names["leased"]]["ip"],
+                        now + timedelta(minutes=30))
+
+    result = await OrphanCleanupService(controller).sweep(db_session)
+
+    assert result["cleaned"] == 1 and result["pending"] == 0
+    assert set(k8s.pods) == {name for case, name in names.items() if case != "eligible"}
+    assert "session-leased" in gateway.bindings
+
+
 def production_service():
     service = object.__new__(ProductionKubernetesService)
     service.namespace = settings.K8S_NAMESPACE
