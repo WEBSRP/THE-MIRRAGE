@@ -287,7 +287,7 @@ class ProductionKubernetesService(KubernetesService):
             failure_threshold=15
         )
         ctf_readiness = client.V1Probe(
-            tcp_socket=client.V1TCPSocketAction(port=80),
+            http_get=client.V1HTTPGetAction(path="/_health", port=80),
             initial_delay_seconds=2,
             period_seconds=2,
             failure_threshold=15
@@ -322,6 +322,7 @@ class ProductionKubernetesService(KubernetesService):
             volume_mounts=[client.V1VolumeMount(
                 name="ctf-flags", mount_path="/run/mirrage-flags", read_only=True
             )],
+            env=[client.V1EnvVar(name="CTF_DEVELOPER_SSH_PUBLIC_KEY", value=settings.CTF_DEVELOPER_SSH_PUBLIC_KEY)],
             ports=[
                 client.V1ContainerPort(container_port=22, name="ctf-ssh"),
                 client.V1ContainerPort(container_port=80, name="ctf-http")

@@ -11,6 +11,11 @@ server {
         return 404;
     }
 
+    location = /_health {
+        access_log off;
+        proxy_pass http://127.0.0.1:5000/_health;
+    }
+
     # Forum submit endpoint proxied to internal backend
     location /forum/submit {
         proxy_pass http://127.0.0.1:5000;
