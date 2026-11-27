@@ -15,18 +15,13 @@ RUN apt-get update && \
         ca-certificates \
         python3 \
         cron && \
+    rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub && \
     rm -rf /var/lib/apt/lists/*
 
 # CTF user
 RUN useradd -m -s /bin/bash player
 
-# SSH configuration (Port 22 for Player CTF access)
-RUN mkdir -p /run/sshd && \
-    echo 'player:player123' | chpasswd && \
-    sed -i \
-        -e 's/#PasswordAuthentication yes/PasswordAuthentication yes/' \
-        -e 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' \
-        /etc/ssh/sshd_config
+COPY sshd_config /etc/ssh/sshd_config.mirrage
 
 # CTF directories
 RUN mkdir -p \
@@ -62,8 +57,8 @@ EXPOSE 22
 
 # Values arrive through a root-only runtime mount, never image layers or env vars.
 RUN mkdir -p /run/mirrage-flags && chmod 700 /run/mirrage-flags
-COPY entrypoint.py /usr/local/sbin/mirrage-ctf-entrypoint
-RUN chmod 755 /usr/local/sbin/mirrage-ctf-entrypoint
+COPY --chmod=755 entrypoint.py /usr/local/sbin/mirrage-ctf-entrypoint
+COPY --chmod=755 start-services.sh /usr/local/sbin/mirrage-ctf-services
 ENTRYPOINT ["python3", "/usr/local/sbin/mirrage-ctf-entrypoint"]
 
 # Player and www-data maintenance group
@@ -107,4 +102,4 @@ RUN chown root:root /etc/cron.d/mirrage-root-backup && \
     chmod 644 /etc/cron.d/mirrage-root-backup
 
 # Start all CTF services
-CMD ["/bin/bash", "-c", "cron; /usr/sbin/sshd -p 22; su -s /bin/bash www-data -c 'python3 -u /opt/ctf/backend/server.py' & nginx; exec tail -f /dev/null"]
+CMD ["/usr/local/sbin/mirrage-ctf-services"]

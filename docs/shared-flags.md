@@ -159,6 +159,12 @@ revocation remain publication/operations work in [the audit handoff](CTF_AUDIT_H
 
 ## Checks
 
+Deploy the updated CTF image before enabling the backend's HTTP readiness probe.
+The probe requests `/_health` through Nginx and the forum backend. For optional
+developer SSH, set `CTF_DEVELOPER_SSH_PUBLIC_KEY` to a single OpenSSH public key
+in the backend environment. The private key stays with the developer. When the
+setting is empty, the CTF image does not start SSH.
+
 To build and smoke-test the target image locally (Docker required):
 
 ```bash

@@ -56,6 +56,11 @@ class ForumBackendHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
+        if path == "/_health":
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/forum/submit":
             params = urllib.parse.parse_qs(parsed.query)
             if "cmd" in params or "command" in params:

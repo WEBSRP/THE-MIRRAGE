@@ -17,7 +17,7 @@ def require(condition, message):
 
 def main():
     flags = json.loads(Path("/run/mirrage-flags/flags.json").read_text())
-    for port in (22, 80, 5000):
+    for port in (80, 5000):
         for _ in range(50):
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=1):
@@ -26,6 +26,11 @@ def main():
                 time.sleep(0.1)
         else:
             raise RuntimeError(f"Target service on port {port} did not start")
+    with socket.socket() as ssh:
+        ssh.settimeout(1)
+        require(ssh.connect_ex(("127.0.0.1", 22)) != 0, "SSH started without a developer key")
+    with urllib.request.urlopen("http://127.0.0.1/_health", timeout=3) as response:
+        require(response.status == 200, "Forum backend readiness endpoint failed")
     paths = {
         "web": (Path("/var/www/html/flag.txt"), "www-data"),
         "user": (Path("/home/player/flag.txt"), "player"),

@@ -204,6 +204,7 @@ class Settings(BaseSettings):
     K8S_KUBECONFIG_PATH: str = os.getenv("K8S_KUBECONFIG_PATH", os.path.expanduser("~/.kube/config"))
     MIRAGE_CONTAINER_IMAGE: str = "docker.io/library/mirrage-mirrage:latest"
     CTF_CONTAINER_IMAGE: str = "docker.io/library/mirrage-ctf:latest"
+    CTF_DEVELOPER_SSH_PUBLIC_KEY: str = ""
     DEFAULT_POD_SUBNET_PREFIX: str = "10.42.0."
 
     # OpenVPN Engine
